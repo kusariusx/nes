@@ -5,6 +5,8 @@ import "core:fmt"
 LOW  :: 0
 HIGH :: 1
 
+STACK_START :: 0x100
+
 // Flags layout in the register:
 // Bit:   76543210
 // Value: NV1BDIZC
@@ -85,11 +87,11 @@ not_implemented :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
 
 stack_push :: proc(cpu: ^CPU, bus: Bus, value: byte) {
 	// Stack is located on the second memory page 0x100-0x1FF
-	bus_write(bus, 0x100 + u16(cpu.S), value)
+	bus_write(bus, STACK_START + u16(cpu.S), value)
 	cpu.S -= 1
 }
 
 stack_pop :: proc(cpu: ^CPU, bus: Bus) -> byte {
 	cpu.S += 1
-	return bus_read(bus, 0x100 + u16(cpu.S))
+	return bus_read(bus, STACK_START + u16(cpu.S))
 }

@@ -427,3 +427,510 @@ jmp_ind :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
         cpu_instruction_done(cpu)
     }
 }
+
+jsr :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Jump to Subroutine
+    switch cycle {
+    case 2:
+        // Fetch low address byte, increment PC
+        cpu.instruction_operand = bus_read(bus, cpu.PC)
+        cpu.PC += 1
+    case 3:
+        // Internal operation - dummy read the stack
+        bus_read(bus, STACK_START + u16(cpu.S))
+    case 4:
+        // Push PCH on stack
+        stack_push(cpu, bus, cpu.PCH)
+    case 5:
+        // Push PCL on stack
+        stack_push(cpu, bus, cpu.PCL)
+    case 6:
+        // Copy low address byte to PCL, fetch high address byte to PCH, done
+        cpu.PCH = bus_read(bus, cpu.PC)
+        cpu.PCL = cpu.instruction_operand
+
+        cpu_instruction_done(cpu)
+    }
+}
+
+load :: proc(cpu: ^CPU, target: ^u8, value: u8) {
+    target^ = value
+
+    cpu.P.Z = target^ == 0 ? 1 : 0
+    cpu.P.N = target^ >> 7
+}
+
+lda :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Load A
+    load(cpu, &cpu.A, value)
+}
+
+lda_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    imm(cpu, bus, cycle, lda)
+}
+
+lda_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read(cpu, bus, cycle, lda)
+}
+
+lda_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read(cpu, bus, cycle, cpu.X, lda)
+}
+
+lda_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read(cpu, bus, cycle, lda)
+}
+
+lda_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.X, lda)
+}
+
+lda_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.Y, lda)
+}
+
+lda_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read(cpu, bus, cycle, lda)
+}
+
+lda_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read(cpu, bus, cycle, lda)
+}
+
+ldx :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Load X
+    load(cpu, &cpu.X, value)
+}
+
+ldx_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    imm(cpu, bus, cycle, ldx)
+}
+
+ldx_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read(cpu, bus, cycle, ldx)
+}
+
+ldx_zpgy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read(cpu, bus, cycle, cpu.Y, ldx)
+}
+
+ldx_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read(cpu, bus, cycle, ldx)
+}
+
+ldx_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.Y, ldx)
+}
+
+ldy :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Load Y
+    load(cpu, &cpu.Y, value)
+}
+
+ldy_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    imm(cpu, bus, cycle, ldy)
+}
+
+ldy_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read(cpu, bus, cycle, ldy)
+}
+
+ldy_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read(cpu, bus, cycle, cpu.X, ldy)
+}
+
+ldy_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read(cpu, bus, cycle, ldy)
+}
+
+ldy_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.X, ldy)
+}
+
+lsr :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Logical Shift Right
+    cpu.P.C = value^ & 1
+    value^ >>= 1
+
+    cpu.P.Z = value^ == 0 ? 1 : 0
+    cpu.P.N = 0
+}
+
+lsr_a :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { lsr(cpu, bus, &cpu.A) })
+}
+
+lsr_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read_modify_write(cpu, bus, cycle, lsr)
+}
+
+lsr_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read_modify_write(cpu, bus, cycle, cpu.X, lsr)
+}
+
+lsr_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read_modify_write(cpu, bus, cycle, lsr)
+}
+
+lsr_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.X, lsr)
+}
+
+nop :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // No Operation
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { })
+}
+
+ora :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Bitwise OR
+    cpu.A |= value
+
+    cpu.P.Z = cpu.A == 0 ? 1 : 0
+    cpu.P.N = cpu.A >> 7
+}
+
+ora_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    imm(cpu, bus, cycle, ora)
+}
+
+ora_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read(cpu, bus, cycle, ora)
+}
+
+ora_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read(cpu, bus, cycle, cpu.X, ora)
+}
+
+ora_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read(cpu, bus, cycle, ora)
+}
+
+ora_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.X, ora)
+}
+
+ora_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.Y, ora)
+}
+
+ora_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read(cpu, bus, cycle, ora)
+}
+
+ora_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read(cpu, bus, cycle, ora)
+}
+
+pha :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Push A
+    switch cycle {
+    case 2:
+        // Dummy read next instruction byte
+        bus_read(bus, cpu.PC)
+    case 3:
+        // Push A on stack, done
+        stack_push(cpu, bus, cpu.A)
+        cpu_instruction_done(cpu)
+    }
+}
+
+php :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Push P
+    switch cycle {
+    case 2:
+        // Dummy read next instruction byte
+        bus_read(bus, cpu.PC)
+    case 3:
+        // Push P on stack with B flag set, done
+        p := cpu.P
+        p.B = 1
+
+        stack_push(cpu, bus, u8(p))
+        cpu_instruction_done(cpu)
+    }
+}
+
+pla :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Pull A
+    switch cycle {
+    case 2:
+        // Dummy read next instruction byte
+        bus_read(bus, cpu.PC)
+    case 3:
+        // Dummy read on the stack
+        bus_read(bus, STACK_START + u16(cpu.S))
+    case 4:
+        // Pull A from stack, set flags, done
+        cpu.A = stack_pop(cpu, bus)
+        
+        cpu.P.Z = cpu.A == 0 ? 1 : 0
+        cpu.P.N = cpu.A >> 7
+
+        cpu_instruction_done(cpu)
+    }
+}
+
+plp :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Pull P
+    switch cycle {
+    case 2:
+        // Dummy read next instruction byte
+        bus_read(bus, cpu.PC)
+    case 3:
+        // Dummy read on the stack
+        bus_read(bus, STACK_START + u16(cpu.S))
+    case 4:
+        // Pull P from stack ignoring/preserving bits 4 and 5, done
+        p := (u8(cpu.P) & 0b00110000) | (stack_pop(cpu, bus) & 0b11001111)
+        cpu.P = CPU_Flags(p)
+        
+        cpu_instruction_done(cpu)
+    }
+}
+
+rol :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Rotate Left (through Carry)
+    c := cpu.P.C
+    cpu.P.C = value^ >> 7
+    value^ = (value^ << 1) | c
+
+    cpu.P.Z = value^ == 0 ? 1 : 0
+    cpu.P.N = value^ >> 7
+}
+
+rol_a :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { rol(cpu, bus, &cpu.A) })
+}
+
+rol_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read_modify_write(cpu, bus, cycle, rol)
+}
+
+rol_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read_modify_write(cpu, bus, cycle, cpu.X, rol)
+}
+
+rol_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read_modify_write(cpu, bus, cycle, rol)
+}
+
+rol_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.X, rol)
+}
+
+ror :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Rotate Right (through Carry)
+    c := cpu.P.C
+    cpu.P.C = value^ & 1
+    value^ = (value^ >> 1) | (c << 7)
+
+    cpu.P.Z = value^ == 0 ? 1 : 0
+    cpu.P.N = c
+}
+
+ror_a :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { ror(cpu, bus, &cpu.A) })
+}
+
+ror_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read_modify_write(cpu, bus, cycle, ror)
+}
+
+ror_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read_modify_write(cpu, bus, cycle, cpu.X, ror)
+}
+
+ror_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read_modify_write(cpu, bus, cycle, ror)
+}
+
+ror_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.X, ror)
+}
+
+rti :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Return from Interrupt
+    switch cycle {
+    case 2:
+        // Dummy read next instruction byte
+        bus_read(bus, cpu.PC)
+    case 3:
+        // Dummy read on the stack
+        bus_read(bus, STACK_START + u16(cpu.S))
+    case 4:
+        // Pull P from stack ignoring/preserving bits 4 and 5
+        p := (u8(cpu.P) & 0b00110000) | (stack_pop(cpu, bus) & 0b11001111)
+        cpu.P = CPU_Flags(p)
+    case 5:
+        // Pull PCL from stack
+        cpu.PCL = stack_pop(cpu, bus)
+    case 6:
+        // Pull PCH from stack, done
+        cpu.PCH = stack_pop(cpu, bus)
+
+        cpu_instruction_done(cpu)
+    }
+}
+
+rts :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Return from Subroutine
+    switch cycle {
+    case 2:
+        // Dummy read next instruction byte
+        bus_read(bus, cpu.PC)
+    case 3:
+        // Dummy read on the stack
+        bus_read(bus, STACK_START + u16(cpu.S))
+    case 4:
+        // Pull PCL from stack
+        cpu.PCL = stack_pop(cpu, bus)
+    case 5:
+        // Pull PCH from stack
+        cpu.PCH = stack_pop(cpu, bus)
+    case 6:
+        // Dummy read at the PC, increment PC, done
+        bus_read(bus, cpu.PC)
+        cpu.PC += 1
+        cpu_instruction_done(cpu)
+    }
+}
+
+sbc :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Subtract with Carry
+    // A = A - value - ~C, or equivalently: A = A + ~value + C 
+    // Even on the hardware level, SBC is implemented using ADC, just with inverted value
+    adc(cpu, bus, ~value)
+}
+
+sbc_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    imm(cpu, bus, cycle, sbc)
+}
+
+sbc_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read(cpu, bus, cycle, sbc)
+}
+
+sbc_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read(cpu, bus, cycle, cpu.X, sbc)
+}
+
+sbc_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read(cpu, bus, cycle, sbc)
+}
+
+sbc_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.X, sbc)
+}
+
+sbc_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.Y, sbc)
+}
+
+sbc_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read(cpu, bus, cycle, sbc)
+}
+
+sbc_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read(cpu, bus, cycle, sbc)
+}
+
+sec :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Set Carry
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.C = 1 })
+}
+
+sed :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Set Decimal
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.D = 1 })
+}
+
+sei :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Set Interrupt Disable
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.I = 1 })
+}
+
+sta_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Store A
+    zpg_write(cpu, bus, cycle, cpu.A)
+}
+
+sta_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_write(cpu, bus, cycle, cpu.X, cpu.A)
+}
+
+sta_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_write(cpu, bus, cycle, cpu.A)
+}
+
+sta_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_write(cpu, bus, cycle, cpu.X, cpu.A)
+}
+
+sta_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_write(cpu, bus, cycle, cpu.Y, cpu.A)
+}
+
+sta_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_write(cpu, bus, cycle, cpu.A)
+}
+
+sta_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_write(cpu, bus, cycle, cpu.A)
+}
+
+stx_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Store X
+    zpg_write(cpu, bus, cycle, cpu.X)
+}
+
+stx_zpgy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { 
+    zpgi_write(cpu, bus, cycle, cpu.Y, cpu.X)
+}
+
+stx_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_write(cpu, bus, cycle, cpu.X)
+}
+
+sty_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Store Y
+    zpg_write(cpu, bus, cycle, cpu.Y)
+}
+
+sty_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { 
+    zpgi_write(cpu, bus, cycle, cpu.X, cpu.Y)
+}
+
+sty_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_write(cpu, bus, cycle, cpu.Y)
+}
+
+transfer :: proc(cpu: ^CPU, target: ^u8, source: u8) {
+    target^ = source
+
+    cpu.P.Z = source == 0 ? 1 : 0
+    cpu.P.N = source >> 7
+}
+
+tax :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer A to X
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.X, cpu.A) })
+}
+
+tay :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer A to Y
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.Y, cpu.A) })
+}
+
+tsx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer S to X
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.X, cpu.S) })
+}
+
+txa :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer X to A
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.A, cpu.X) })
+}
+
+txs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer X to S
+    // In contrast to other transfer instructions, this one does not set flags
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.S = cpu.X })
+}
+
+tya :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer Y to A
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.A, cpu.Y) })
+}
+
+// Illegal opcodes
+nop_implied :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { })
+}
+
+nop_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+}
+
+nop_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read(cpu, bus, cycle, cpu.X, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+}
+
+nop_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+}
+
+nop_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.X, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+}

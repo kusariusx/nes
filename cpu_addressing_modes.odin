@@ -325,3 +325,131 @@ implied :: proc(cpu: ^CPU, bus: Bus, cycle: u8, action: proc(cpu: ^CPU, bus: Bus
         cpu_instruction_done(cpu)
     }
 }
+
+// Zero-page addressing, write instructions
+zpg_write :: proc(cpu: ^CPU, bus: Bus, cycle: u8, value: u8) {
+    switch cycle {
+    case 2:
+        // Fetch address, increment PC
+        cpu.instruction_operand = bus_read(bus, cpu.PC)
+        cpu.PC += 1
+    case 3:
+        // Write value to effective address, done
+        bus_write(bus, u16(cpu.instruction_operand), value)
+        cpu_instruction_done(cpu)
+    }
+}
+
+// Zero-page indexed addressing, write instructions
+zpgi_write :: proc(cpu: ^CPU, bus: Bus, cycle: u8, index_register: u8, value: u8) {
+    switch cycle {
+    case 2:
+        // Fetch address, increment PC
+        cpu.instruction_operand = bus_read(bus, cpu.PC)
+        cpu.PC += 1
+    case 3:
+        // Read from address, add index to it
+        bus_read(bus, u16(cpu.instruction_operand))
+        cpu.instruction_operand += index_register
+    case 4:    
+        // Write value to effective address, done
+        bus_write(bus, u16(cpu.instruction_operand), value)
+        cpu_instruction_done(cpu)
+    }
+}
+
+// Absolute addressing, write instructions
+abs_write :: proc(cpu: ^CPU, bus: Bus, cycle: u8, value: u8) {
+    switch cycle {
+    case 2:
+        // Fetch low byte of address, increment PC
+        cpu.instruction_operands.bytes[LOW] = bus_read(bus, cpu.PC)
+        cpu.PC += 1
+    case 3:
+        // Fetch high byte of address, increment PC
+        cpu.instruction_operands.bytes[HIGH] = bus_read(bus, cpu.PC)
+        cpu.PC += 1
+    case 4:    
+        // Write value to effective address, done
+        bus_write(bus, cpu.instruction_operands.whole, value)
+        cpu_instruction_done(cpu)
+    }
+}
+
+// Absolute indexed addressing, write instructions
+absi_write :: proc(cpu: ^CPU, bus: Bus, cycle: u8, index_register: u8, value: u8) {
+    switch cycle {
+    case 2:
+        // Fetch low byte of address, increment PC
+        cpu.instruction_operands.bytes[LOW] = bus_read(bus, cpu.PC)
+        cpu.PC += 1
+    case 3:
+        // Fetch high byte of address, add index to low address byte, increment PC
+        cpu.instruction_operands.bytes[HIGH] = bus_read(bus, cpu.PC)
+        cpu.instruction_operands.bytes[LOW] += index_register
+        cpu.PC += 1
+    case 4:
+        // Dummy read from effective address, fix the high byte of effective address if page boundary crossed
+        bus_read(bus, cpu.instruction_operands.whole)
+        
+        if cpu.instruction_operands.bytes[LOW] < index_register { 
+            cpu.instruction_operands.bytes[HIGH] += 1
+        }
+    case 5:
+        // Write value to effective address, done
+        bus_write(bus, cpu.instruction_operands.whole, value)
+        cpu_instruction_done(cpu)
+    }
+}
+
+// Indexed indirect addressing, write instructions
+indx_write :: proc(cpu: ^CPU, bus: Bus, cycle: u8, value: u8) {
+    switch cycle {
+    case 2:
+        // Fetch pointer address, increment PC
+        cpu.instruction_operand = bus_read(bus, cpu.PC)
+        cpu.PC += 1
+    case 3:
+        // Read from pointer address (on zero page), add X to pointer address
+        bus_read(bus, u16(cpu.instruction_operand))
+        cpu.instruction_operand += cpu.X
+    case 4:
+        // Fetch effective address low byte
+        cpu.instruction_operands.bytes[LOW] = bus_read(bus, u16(cpu.instruction_operand))
+    case 5:
+        // Fetch effective address high byte
+        cpu.instruction_operands.bytes[HIGH] = bus_read(bus, u16(cpu.instruction_operand+1))
+    case 6:
+        // Write value to effective address, done
+        bus_write(bus, cpu.instruction_operands.whole, value)
+        cpu_instruction_done(cpu)
+    }
+}
+
+// Indirect indexed addressing, write instructions
+indy_write :: proc(cpu: ^CPU, bus: Bus, cycle: u8, value: u8) {
+    switch cycle {
+    case 2:
+        // Fetch pointer address, increment PC
+        cpu.instruction_operand = bus_read(bus, cpu.PC)
+        cpu.PC += 1
+    case 3:
+        // Fetch effective address low byte
+        cpu.instruction_operands.bytes[LOW] = bus_read(bus, u16(cpu.instruction_operand))
+    case 4:
+        // Fetch effective address high byte, add Y to low address byte
+        cpu.instruction_operands.bytes[HIGH] = bus_read(bus, u16(cpu.instruction_operand+1))
+        cpu.instruction_operands.bytes[LOW] += cpu.Y
+    case 5:
+        // Read from effective address, fix high byte if page crossed
+        bus_read(bus, cpu.instruction_operands.whole)
+        
+        if cpu.instruction_operands.bytes[LOW] < cpu.Y { 
+            cpu.instruction_operands.bytes[HIGH] += 1
+        }
+    case 6:
+        // Write value to effective address, done
+        bus_write(bus, cpu.instruction_operands.whole, value)
+        cpu_instruction_done(cpu)
+    }
+}
