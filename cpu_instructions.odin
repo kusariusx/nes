@@ -85,7 +85,7 @@ and_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
 	indy_read(cpu, bus, cycle, and)
 }
 
-asl :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Arithmetic shift right
+asl :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Arithmetic Shift Left
     cpu.P.C = value^ >> 7
     value^ <<= 1
 
@@ -915,6 +915,7 @@ tya :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer Y to A
 }
 
 // Illegal opcodes
+
 nop_implied :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { })
 }
@@ -958,4 +959,446 @@ jam :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
         cpu.halt = true 
         cpu_instruction_done(cpu)
     }
+}
+
+alr :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // AND + LSR
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+        and(cpu, bus, value)
+        lsr(cpu, bus, &cpu.A)
+    })
+}
+
+anc :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // AND + set result bit 7 to C
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+        and(cpu, bus, value)
+        cpu.P.C = cpu.A >> 7
+    })
+}
+
+ane :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // (A OR CONST) AND X AND value -> A
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+        // This instruction is highly unstable because it depends on a constant the value of which 
+        // is ultimately random and depends on temperature, CPU chip series, and potentially other factors.
+        // Using 0xEE as the constant's value in order to pass the tests, but on real hardware the constant will 
+        // be random with some more-probable typical values of 0xFF, 0xFE, 0xEE and 0x00.
+        cpu.A = (cpu.A | 0xEE) & cpu.X & value
+
+        cpu.P.Z = cpu.A == 0 ? 1 : 0
+        cpu.P.N = cpu.A >> 7
+    })
+}
+
+arr :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // AND + ROR
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+        // This opcode activates some parts related to ADC, leading to weird side effects. Full description:
+        // In Binary mode (D flag clear), the instruction effectively does an AND between the accumulator and 
+        // the immediate parameter, and then shifts the accumulator to the right, copying the C flag to the 8th bit. 
+        // It sets the Negative and Zero flags just like the ROR would. The ADC code shows up in the Carry and 
+        // Overflow flags. The C flag will be copied from the bit 6 of the result (which doesn't seem too logical), and the
+        // V flag is the result of an Exclusive OR operation between the bit 6 and the bit 5 of the result.
+
+        result := cpu.A & value // AND with value
+        result = (result >> 1) | (cpu.P.C << 7) // Shift right
+
+        cpu.P.Z = result == 0 ? 1 : 0
+        cpu.P.N = result >> 7
+
+        cpu.P.C = (result >> 6) & 1 
+        cpu.P.V = ((result >> 6) & 1) ~ ((result >> 5) & 1)
+
+        cpu.A = result
+    })
+}
+
+dcp :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // DEC + CMP
+    // Decrements the operand and then compares the result to the accumulator
+    dec(cpu, bus, value)
+    compare(cpu, cpu.A, value^)
+}
+
+dcp_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read_modify_write(cpu, bus, cycle, dcp)
+}
+
+dcp_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read_modify_write(cpu, bus, cycle, cpu.X, dcp)
+}
+
+dcp_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read_modify_write(cpu, bus, cycle, dcp)
+}
+
+dcp_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.X, dcp)
+}
+
+dcp_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.Y, dcp)
+}
+
+dcp_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read_modify_write(cpu, bus, cycle, dcp)
+}
+
+dcp_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read_modify_write(cpu, bus, cycle, dcp)
+}
+
+isc :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // INC + SBC
+    inc(cpu, bus, value)
+    sbc(cpu, bus, value^)
+}
+
+isc_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read_modify_write(cpu, bus, cycle, isc)
+}
+
+isc_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read_modify_write(cpu, bus, cycle, cpu.X, isc)
+}
+
+isc_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read_modify_write(cpu, bus, cycle, isc)
+}
+
+isc_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.X, isc)
+}
+
+isc_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.Y, isc)
+}
+
+isc_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read_modify_write(cpu, bus, cycle, isc)
+}
+
+isc_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read_modify_write(cpu, bus, cycle, isc)
+}
+
+las_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // LDA/TSX (kinda)
+    absi_read(cpu, bus, cycle, cpu.Y, proc(cpu: ^CPU, bus: Bus, value: u8) {
+        result := value & cpu.S
+
+        cpu.A = result
+        cpu.X = result
+        cpu.S = result
+
+        cpu.P.Z = result == 0 ? 1 : 0
+        cpu.P.N = result >> 7
+    })
+}
+
+lax :: proc(cpu: ^CPU, bus: Bus, value: u8) { // LDA + LDX
+    lda(cpu, bus, value)
+    ldx(cpu, bus, value)
+}
+
+lax_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read(cpu, bus, cycle, lax)
+}
+
+lax_zpgy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read(cpu, bus, cycle, cpu.Y, lax)
+}
+
+lax_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read(cpu, bus, cycle, lax)
+}
+
+lax_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.Y, lax)
+}
+
+lax_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read(cpu, bus, cycle, lax)
+}
+
+lax_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read(cpu, bus, cycle, lax)
+}
+
+lxa :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // LAX immediate
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+        // This instruction includes an environment-dependent magic constant, thus highly unstable.
+        // Using 0xEE as a magic constant to pass the tests.
+        result := (cpu.A | 0xEE) & value
+        
+        cpu.A = result
+        cpu.X = result
+
+        cpu.P.Z = result == 0 ? 1 : 0
+        cpu.P.N = result >> 7
+    })
+}
+
+rla :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // ROL + AND
+    rol(cpu, bus, value)
+    and(cpu, bus, value^)
+}
+
+rla_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read_modify_write(cpu, bus, cycle, rla)
+}
+
+rla_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read_modify_write(cpu, bus, cycle, cpu.X, rla)
+}
+
+rla_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read_modify_write(cpu, bus, cycle, rla)
+}
+
+rla_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.X, rla)
+}
+
+rla_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.Y, rla)
+}
+
+rla_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read_modify_write(cpu, bus, cycle, rla)
+}
+
+rla_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read_modify_write(cpu, bus, cycle, rla)
+}
+
+rra :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // ROR + ADC
+    ror(cpu, bus, value)
+    adc(cpu, bus, value^)
+}
+
+rra_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read_modify_write(cpu, bus, cycle, rra)
+}
+
+rra_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read_modify_write(cpu, bus, cycle, cpu.X, rra)
+}
+
+rra_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read_modify_write(cpu, bus, cycle, rra)
+}
+
+rra_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.X, rra)
+}
+
+rra_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.Y, rra)
+}
+
+rra_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read_modify_write(cpu, bus, cycle, rra)
+}
+
+rra_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read_modify_write(cpu, bus, cycle, rra)
+}
+
+// A and X are put on the bus at the same time (resulting effectively in an AND operation) and stored in M
+sax_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_write(cpu, bus, cycle, cpu.A & cpu.X)
+}
+
+sax_zpgy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_write(cpu, bus, cycle, cpu.Y, cpu.A & cpu.X)
+}
+
+sax_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_write(cpu, bus, cycle, cpu.A & cpu.X)
+}
+
+sax_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_write(cpu, bus, cycle, cpu.A & cpu.X)
+}
+
+sbx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // CMP and DEX at once, sets flags like CMP
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+        ax := cpu.A & cpu.X
+        compare(cpu, ax, value)
+        cpu.X = ax - value
+    })
+}
+
+sha_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    switch cycle {
+    case 2 ..= 4:
+        absi_write(cpu, bus, cycle, cpu.Y, 0)
+    case 5:
+        // We need to intercept the 5th cycle of the instruction to get access to effective address (calculated on previous cycles).
+        // This instruction is weird and very unstable. General description/observations from my own research:
+        // 1. The core of this instruction is the fact that multiple values are being written on the bus simultaneously,
+        //    effectively being AND'ed.
+        // 2. The value we write is always A & X & (H + 1), where H is the original (non-corrected, non-corrupted)
+        //    high byte of the effective address we read from PC.
+        // 3. When the page boundary is not crossed, the effective address does not change.
+        // 4. When the page boundary is crossed, the high byte of the effetive address itself is corrupted and
+        //    gets AND'ed with A & X.
+
+        value := cpu.A & cpu.X
+        if cpu.instruction_operands.bytes[LOW] < cpu.Y { // Page crossed
+            // Not adding 1 because the high byte was already incremented on 4th cycle
+            value &= cpu.instruction_operands.bytes[HIGH] 
+            
+            // Corruption of high byte of the effective address
+            cpu.instruction_operands.bytes[HIGH] &= cpu.A & cpu.X
+        } else {
+            value &= cpu.instruction_operands.bytes[HIGH] + 1
+        }
+
+        absi_write(cpu, bus, cycle, cpu.Y, value)
+    }
+}
+
+sha_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    switch cycle {
+    case 2 ..= 5:
+        indy_write(cpu, bus, cycle, 0)
+    case 6:
+        // Same logic as in sha_absy, but we intercept the 6th cycle.
+
+        value := cpu.A & cpu.X
+        if cpu.instruction_operands.bytes[LOW] < cpu.Y {
+            value &= cpu.instruction_operands.bytes[HIGH] 
+            cpu.instruction_operands.bytes[HIGH] &= cpu.A & cpu.X
+        } else {
+            value &= cpu.instruction_operands.bytes[HIGH] + 1
+        }
+
+        indy_write(cpu, bus, cycle, value)
+    }
+}
+
+shx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    switch cycle {
+    case 2 ..= 4:
+        absi_write(cpu, bus, cycle, cpu.Y, 0)
+    case 5:
+        // Same logic as in sha_absy, but the corruption takes the form of X and not A & X.
+
+        value := cpu.X
+        if cpu.instruction_operands.bytes[LOW] < cpu.Y { 
+            value &= cpu.instruction_operands.bytes[HIGH] 
+            cpu.instruction_operands.bytes[HIGH] &= cpu.X
+        } else {
+            value &= cpu.instruction_operands.bytes[HIGH] + 1
+        }
+
+        absi_write(cpu, bus, cycle, cpu.Y, value)
+    }
+}
+
+shy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    switch cycle {
+    case 2 ..= 4:
+        absi_write(cpu, bus, cycle, cpu.X, 0)
+    case 5:
+        // Same logic as in sha_absy, but the corruption takes the form of Y and not A & X.
+
+        value := cpu.Y
+        if cpu.instruction_operands.bytes[LOW] < cpu.X { 
+            value &= cpu.instruction_operands.bytes[HIGH] 
+            cpu.instruction_operands.bytes[HIGH] &= cpu.Y
+        } else {
+            value &= cpu.instruction_operands.bytes[HIGH] + 1
+        }
+
+        absi_write(cpu, bus, cycle, cpu.X, value)
+    }
+}
+
+slo :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // ASL + ORA
+    asl(cpu, bus, value)
+    ora(cpu, bus, value^)
+}
+
+slo_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read_modify_write(cpu, bus, cycle, slo)
+}
+
+slo_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read_modify_write(cpu, bus, cycle, cpu.X, slo)
+}
+
+slo_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read_modify_write(cpu, bus, cycle, slo)
+}
+
+slo_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.X, slo)
+}
+
+slo_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.Y, slo)
+}
+
+slo_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read_modify_write(cpu, bus, cycle, slo)
+}
+
+slo_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read_modify_write(cpu, bus, cycle, slo)
+}
+
+sre :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // LSR + EOR
+    lsr(cpu, bus, value)
+    eor(cpu, bus, value^)
+}
+
+sre_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read_modify_write(cpu, bus, cycle, sre)
+}
+
+sre_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpgi_read_modify_write(cpu, bus, cycle, cpu.X, sre)
+}
+
+sre_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    abs_read_modify_write(cpu, bus, cycle, sre)
+}
+
+sre_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.X, sre)
+}
+
+sre_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    absi_read_modify_write(cpu, bus, cycle, cpu.Y, sre)
+}
+
+sre_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indx_read_modify_write(cpu, bus, cycle, sre)
+}
+
+sre_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    indy_read_modify_write(cpu, bus, cycle, sre)
+}
+
+tas :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    switch cycle {
+    case 2 ..= 4:
+        absi_write(cpu, bus, cycle, cpu.Y, 0)
+    case 5:
+        // Puts A AND X in SP and stores A AND X AND (high-byte of addr. + 1) at addr.
+        // Same logic as in sha_absy, but with an additional action.
+
+        cpu.S = cpu.A & cpu.X
+
+        value := cpu.A & cpu.X
+        if cpu.instruction_operands.bytes[LOW] < cpu.Y { 
+            value &= cpu.instruction_operands.bytes[HIGH] 
+            cpu.instruction_operands.bytes[HIGH] &= cpu.A & cpu.X
+        } else {
+            value &= cpu.instruction_operands.bytes[HIGH] + 1
+        }
+
+        absi_write(cpu, bus, cycle, cpu.Y, value)
+    }
+}
+
+usbc :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // SBC + NOP, effectively the same as SBC
+    sbc_imm(cpu, bus, cycle)
 }

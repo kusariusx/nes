@@ -31,7 +31,7 @@ test_instructions :: proc(t: ^testing.T) {
             return
         }
 
-        // if info.name != "02.json" {
+        // if info.name != "eb.json" {
         //     return
         // }
 
@@ -113,5 +113,5 @@ test_instructions :: proc(t: ^testing.T) {
         return
     }
 
-    filepath.walk("test", walk_proc , t)
+    filepath.walk("test", walk_proc, t)
 }
