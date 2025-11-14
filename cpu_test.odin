@@ -31,7 +31,7 @@ test_instructions :: proc(t: ^testing.T) {
             return
         }
 
-        // if info.name != "90.json" {
+        // if info.name != "02.json" {
         //     return
         // }
 

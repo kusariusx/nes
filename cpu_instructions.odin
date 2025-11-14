@@ -923,6 +923,10 @@ nop_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { })
 }
 
+nop_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    zpg_read(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+}
+
 nop_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     zpgi_read(cpu, bus, cycle, cpu.X, proc(cpu: ^CPU, bus: Bus, value: u8) { })
 }
@@ -933,4 +937,25 @@ nop_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
 
 nop_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.X, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+}
+
+jam :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+    switch cycle {
+    case 2:
+        // These bus reads are added in order to pass the CPU tests, I assume those are done by real hardware
+
+        // Read the next instruction byte
+        bus_read(bus, cpu.PC)
+    case 3:
+        // Re-read the next instruction byte
+        bus_read(bus, cpu.PC)
+
+        // Decrement the PC - this instruction must leave the CPU state unchanged, including the PC
+        cpu.PC -= 1
+
+        // Halt the CPU, done
+        // TODO: set data bus to 0xFF
+        cpu.halt = true 
+        cpu_instruction_done(cpu)
+    }
 }

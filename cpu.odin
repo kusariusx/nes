@@ -34,6 +34,8 @@ CPU :: struct {
         whole: u16,
     },
 
+	halt: bool,
+
 	// Registers
 	A:                   byte, // Accumulator
 	X, Y:                byte, // Indexing registers
@@ -54,6 +56,11 @@ Instruction :: struct {
 }
 
 cpu_tick :: proc(cpu: ^CPU, bus: Bus) {
+	if cpu.halt {
+		// Ignore the tick if CPU is halted
+		return
+	}
+
 	if cpu.instruction == nil { // We start executing a new instruction
 		// This is the first cycle of any instruction
 		// Start with 1 for better alignment with the documentation
