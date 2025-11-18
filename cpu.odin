@@ -85,6 +85,14 @@ cpu_instruction_done :: proc(cpu: ^CPU) {
 	cpu.instruction = nil
 }
 
+cpu_reset :: proc(cpu: ^CPU) {
+	cpu.A, cpu.X, cpu.Y = 0, 0, 0
+	cpu.S = 0xFD
+	
+	cpu.P.C, cpu.P.Z, cpu.P.D, cpu.P.V, cpu.P.N = 0, 0, 0, 0, 0
+	cpu.P.I = 1
+}
+
 not_implemented :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
 	opcode := bus_read(bus, cpu.PC)
 	fmt.printf("opcode %x is not implemented\n", opcode)

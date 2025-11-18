@@ -1,5 +1,8 @@
 package main
 
+import "core:strings"
+import "core:fmt"
+import "core:mem"
 import "core:time"
 import "core:os"
 import "core:log"
@@ -25,15 +28,11 @@ Test_Data :: struct {
 }
 
 @(test)
-test_instructions :: proc(t: ^testing.T) {
+test_instructions_json :: proc(t: ^testing.T) {
     walk_proc :: proc(info: os.File_Info, in_err: os.Error, user_data: rawptr) -> (walk_err: os.Error, skip_dir: bool) {
-        if info.is_dir {
+        if info.is_dir || !strings.ends_with(info.name, ".json") {
             return
         }
-
-        // if info.name != "eb.json" {
-        //     return
-        // }
 
         data, ok := os.read_entire_file(info.fullpath)
         if !ok {
@@ -74,7 +73,7 @@ test_instructions :: proc(t: ^testing.T) {
                 P = CPU_Flags(tc.initial.p),
             }
 
-            bus := Test_Bus{}
+            bus := Test_Bus{track_memory_access = true}
             for el in tc.initial.ram {
                 address, value := el[0], byte(el[1])
                 bus.ram[address] = value
@@ -113,5 +112,41 @@ test_instructions :: proc(t: ^testing.T) {
         return
     }
 
-    filepath.walk("test", walk_proc, t)
+    filepath.walk("test/cpu", walk_proc, t)
+}
+
+@(test)
+test_instructions_nestest :: proc(t: ^testing.T) {
+    rom_data, ok := os.read_entire_file("test/cpu/nestest.nes")
+    testing.expect_value(t, ok, true)
+    defer delete(rom_data)
+
+    rom, err := parse_rom(rom_data)
+    testing.expect_value(t, err, nil)
+    defer rom_free(rom)
+
+    log.infof("%v", rom.header)
+
+    // cpu := CPU{}
+    // cpu_reset(&cpu)
+    // cpu.PC = 0xC000
+
+    // bus := Test_Bus{track_memory_access = false}
+    // copy(bus.ram[0x8000:], rom)
+
+    // buffer: [1]byte
+
+    // loc02, loc03: u8
+    // for cpu.PC < 0xFFFF && loc02 == 0 && loc03 == 0 {
+    //     cpu_tick(&cpu, &bus)
+    //     log.infof("(%X): %s", cpu.PC, cpu.instruction.mnemonic)
+    //     os.read(os.stdin, buffer[:])
+    //     for cpu.instruction != nil {
+    //         cpu_tick(&cpu, &bus)
+    //     }
+
+    //     loc02, loc03 = bus_read(&bus, 0x02), bus_read(&bus, 0x03)
+    // }
+
+    // log.infof("(0x02) = %X; (0x03) = %X", loc02, loc03)
 }
