@@ -90,7 +90,7 @@ cpu_reset :: proc(cpu: ^CPU) {
 	cpu.S = 0xFD
 	
 	cpu.P.C, cpu.P.Z, cpu.P.D, cpu.P.V, cpu.P.N = 0, 0, 0, 0, 0
-	cpu.P.I = 1
+	cpu.P.I, cpu.P.unused = 1, 1
 }
 
 not_implemented :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {

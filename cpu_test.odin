@@ -1,14 +1,14 @@
 package main
 
 import "core:strings"
-import "core:fmt"
-import "core:mem"
-import "core:time"
 import "core:os"
 import "core:log"
 import "core:path/filepath"
 import "core:encoding/json"
 import "core:testing"
+
+import "rom"
+import "mapper"
 
 Test_CPU_State :: struct {
 	pc:  u16 `json:"pc"`,
@@ -121,32 +121,34 @@ test_instructions_nestest :: proc(t: ^testing.T) {
     testing.expect_value(t, ok, true)
     defer delete(rom_data)
 
-    rom, err := parse_rom(rom_data)
+    r, err := rom.parse_rom(rom_data)
     testing.expect_value(t, err, nil)
-    defer rom_free(rom)
+    defer rom.rom_free(r)
 
-    log.infof("%v", rom.header)
+    cpu := CPU{}
+    cpu_reset(&cpu)
+    cpu.PC = 0xC000
 
-    // cpu := CPU{}
-    // cpu_reset(&cpu)
-    // cpu.PC = 0xC000
+    m := mapper.NROM{}
+    bus := NES_Bus{
+        rom = r,
+        mapper = &m,
+    }
 
-    // bus := Test_Bus{track_memory_access = false}
-    // copy(bus.ram[0x8000:], rom)
+    buffer: [1]byte
 
-    // buffer: [1]byte
+    loc02, loc03: u8
+    instrs := 0
+    for cpu.PC < 0xFFFF && loc02 == 0 && loc03 == 0 && !cpu.halt {
+        cpu_tick(&cpu, &bus)
+        for cpu.instruction != nil {
+            cpu_tick(&cpu, &bus)
+        }
 
-    // loc02, loc03: u8
-    // for cpu.PC < 0xFFFF && loc02 == 0 && loc03 == 0 {
-    //     cpu_tick(&cpu, &bus)
-    //     log.infof("(%X): %s", cpu.PC, cpu.instruction.mnemonic)
-    //     os.read(os.stdin, buffer[:])
-    //     for cpu.instruction != nil {
-    //         cpu_tick(&cpu, &bus)
-    //     }
+        loc02, loc03 = bus_read(&bus, 0x02), bus_read(&bus, 0x03)
+        instrs += 1
+    }
 
-    //     loc02, loc03 = bus_read(&bus, 0x02), bus_read(&bus, 0x03)
-    // }
-
-    // log.infof("(0x02) = %X; (0x03) = %X", loc02, loc03)
+    testing.expect_value(t, loc02, 0)
+    testing.expect_value(t, loc03, 0)
 }

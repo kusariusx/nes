@@ -1,14 +1,27 @@
 package main
 
+import "mapper"
+import "rom"
+
 OPEN_BUS_VALUE :: 0xFF
 
 NES_Bus :: struct {
 	ram: [2 * 1024]u8, // 2 KB internal RAM
 
-    
+    rom: ^rom.ROM,
+    mapper: mapper.Mapper,
 }
 
 nes_bus_read :: proc(b: ^NES_Bus, address: u16) -> u8 {
+    if address >= 0x4020 && address <= 0xFFFF { // Unmapped space, let mapper handle
+        value, handled := mapper.mapper_read(b.mapper, b.rom, address)
+        if handled {
+            return value
+        }
+
+        return OPEN_BUS_VALUE
+    }
+
     memory := nes_bus_resolve(b, address)
     if memory != nil {
         return memory^
@@ -18,6 +31,11 @@ nes_bus_read :: proc(b: ^NES_Bus, address: u16) -> u8 {
 }
 
 nes_bus_write :: proc(b: ^NES_Bus, address: u16, value: u8) {
+    if address >= 0x4020 && address <= 0xFFFF { 
+        mapper.mapper_write(b.mapper, b.rom, address, value)
+        return // Ignore unhandled writes
+    }
+
     memory := nes_bus_resolve(b, address)
     if memory != nil {
         memory^ = value

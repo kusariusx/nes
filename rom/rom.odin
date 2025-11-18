@@ -1,9 +1,12 @@
-package main
+package rom
 
+import "core:log"
 import "core:mem"
 
 PRG_ROM_BANK_SIZE :: 0x4000
 CHR_ROM_BANK_SIZE :: 0x2000
+
+PRG_RAM_BANK_SIZE :: 0x2000
 
 INES_Header_Data :: struct {
     flags_8: byte, // Number of PRG RAM banks
@@ -96,12 +99,14 @@ parse_rom :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
 
     // PRG ROM
     prg_rom_size := int(rom.header.prg_rom_banks) * PRG_ROM_BANK_SIZE
+    rom.prg_rom = make([]byte, prg_rom_size)
     copy(rom.prg_rom, data[ptr:ptr+prg_rom_size])
     ptr += prg_rom_size
 
     // CHR ROM
     chr_rom_size := int(rom.header.chr_rom_banks) * CHR_ROM_BANK_SIZE
-    copy(rom.prg_rom, data[ptr:ptr+chr_rom_size])
+    rom.chr_rom = make([]byte, chr_rom_size)
+    copy(rom.chr_rom, data[ptr:ptr+chr_rom_size])
     ptr += chr_rom_size
 
     return
@@ -112,4 +117,13 @@ rom_free :: proc(rom: ^ROM) {
     delete(rom.chr_rom)
 
     free(rom)
+}
+
+prg_ram_size :: proc(rom: ^ROM) -> u16 {
+    switch flags in rom.header.format_specific_flags {
+    case INES_Header_Data:
+        return u16(flags.flags_8) * PRG_RAM_BANK_SIZE
+    }
+
+    return 0
 }
