@@ -14,7 +14,7 @@ nrom_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handled: 
         }
     case 0x8000 ..= 0xFFFF: // PRG-ROM
         prg_rom_size := u16(r.header.prg_rom_banks) * PRG_ROM_BANK_SIZE
-        effective_address := (address - 0x8000) % prg_rom_size
+        effective_address := (address - 0x8000) % prg_rom_size // Modulo actual size to implement mirroring
         return r.prg_rom[effective_address], true
     }
 
