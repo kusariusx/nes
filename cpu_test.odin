@@ -7,9 +7,6 @@ import "core:path/filepath"
 import "core:encoding/json"
 import "core:testing"
 
-import "rom"
-import "mapper"
-
 Test_CPU_State :: struct {
 	pc:  u16 `json:"pc"`,
 	s:   byte `json:"s"`,
@@ -121,17 +118,17 @@ test_instructions_nestest :: proc(t: ^testing.T) {
     testing.expect_value(t, ok, true)
     defer delete(rom_data)
 
-    r, err := rom.parse(rom_data)
+    rom, err := rom_parse(rom_data)
     testing.expect_value(t, err, nil)
-    defer rom.free(r)
+    defer rom_free(rom)
 
     cpu := CPU{}
     cpu_reset(&cpu)
     cpu.PC = 0xC000
 
-    m := mapper.NROM{}
+    m := NROM{}
     bus := NES_Bus{
-        rom = r,
+        rom = rom,
         mapper = &m,
     }
 

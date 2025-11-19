@@ -1,4 +1,4 @@
-package rom
+package main
 
 import "core:mem"
 
@@ -64,7 +64,7 @@ Parsing_Error :: union {
     Parsing_Errors,
 }
 
-parse :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
+rom_parse :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
     if len(data) < 16 {
         return nil, Parsing_Errors.Invalid_Header
     }
@@ -111,14 +111,14 @@ parse :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
     return
 }
 
-free :: proc(rom: ^ROM) {
+rom_free :: proc(rom: ^ROM) {
     delete(rom.prg_rom)
     delete(rom.chr_rom)
 
     free(rom)
 }
 
-prg_ram_size :: proc(rom: ^ROM) -> u16 {
+rom_prg_ram_size :: proc(rom: ^ROM) -> u16 {
     switch flags in rom.header.format_specific_flags {
     case INES_Header_Data:
         return u16(flags.flags_8) * PRG_RAM_BANK_SIZE
