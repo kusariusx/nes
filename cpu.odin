@@ -52,10 +52,10 @@ CPU :: struct {
 
 Instruction :: struct {
 	mnemonic: string, // For disassembly/debug
-	handler:  proc(cpu: ^CPU, bus: Bus, cycle: u8),
+	handler:  proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8),
 }
 
-cpu_tick :: proc(cpu: ^CPU, bus: Bus) {
+cpu_tick :: proc(cpu: ^CPU, bus: CPU_Bus) {
 	if cpu.halt {
 		// Ignore the tick if CPU is halted
 		return
@@ -67,7 +67,7 @@ cpu_tick :: proc(cpu: ^CPU, bus: Bus) {
 		cpu.instruction_cycle = 1
 
 		// Fetch opcode, decode instruction
-		opcode := bus_read(bus, cpu.PC)
+		opcode := cpu_bus_read(bus, cpu.PC)
 		cpu.instruction = &Instructions[opcode]
 
 		// Increment PC
@@ -93,20 +93,20 @@ cpu_reset :: proc(cpu: ^CPU) {
 	cpu.P.I, cpu.P.unused = 1, 1
 }
 
-not_implemented :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-	opcode := bus_read(bus, cpu.PC)
+not_implemented :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+	opcode := cpu_bus_read(bus, cpu.PC)
 	fmt.printf("opcode %x is not implemented\n", opcode)
 
 	cpu_instruction_done(cpu) // Done after 1 cycle
 }
 
-stack_push :: proc(cpu: ^CPU, bus: Bus, value: byte) {
+stack_push :: proc(cpu: ^CPU, bus: CPU_Bus, value: byte) {
 	// Stack is located on the second memory page 0x100-0x1FF
-	bus_write(bus, STACK_START + u16(cpu.S), value)
+	cpu_bus_write(bus, STACK_START + u16(cpu.S), value)
 	cpu.S -= 1
 }
 
-stack_pop :: proc(cpu: ^CPU, bus: Bus) -> byte {
+stack_pop :: proc(cpu: ^CPU, bus: CPU_Bus) -> byte {
 	cpu.S += 1
-	return bus_read(bus, STACK_START + u16(cpu.S))
+	return cpu_bus_read(bus, STACK_START + u16(cpu.S))
 }

@@ -1,6 +1,6 @@
 package main
 
-adc :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Add with Carry
+adc :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Add with Carry
     result_full := u16(cpu.A) + u16(value) + u16(cpu.P.C)
     result := byte(result_full & 0xFF)
 
@@ -12,39 +12,39 @@ adc :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Add with Carry
     cpu.A = result
 }
 
-adc_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+adc_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	imm(cpu, bus, cycle, adc)
 }
 
-adc_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+adc_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	zpg_read(cpu, bus, cycle, adc)
 }
 
-adc_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+adc_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	zpgi_read(cpu, bus, cycle, cpu.X, adc)
 }
 
-adc_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+adc_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	abs_read(cpu, bus, cycle, adc)
 }
 
-adc_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+adc_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	absi_read(cpu, bus, cycle, cpu.X, adc)
 }
 
-adc_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+adc_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	absi_read(cpu, bus, cycle, cpu.Y, adc)
 }
 
-adc_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+adc_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	indx_read(cpu, bus, cycle, adc)
 }
 
-adc_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+adc_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	indy_read(cpu, bus, cycle, adc)
 }
 
-and :: proc(cpu: ^CPU, bus: Bus, value: u8) {
+and :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) {
     result := cpu.A & value
 
     cpu.P.Z = result == 0 ? 1 : 0
@@ -53,39 +53,39 @@ and :: proc(cpu: ^CPU, bus: Bus, value: u8) {
     cpu.A = result
 }
 
-and_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+and_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	imm(cpu, bus, cycle, and)
 }
 
-and_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+and_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	zpg_read(cpu, bus, cycle, and)
 }
 
-and_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+and_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	zpgi_read(cpu, bus, cycle, cpu.X, and)
 }
 
-and_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+and_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	abs_read(cpu, bus, cycle, and)
 }
 
-and_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+and_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	absi_read(cpu, bus, cycle, cpu.X, and)
 }
 
-and_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+and_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	absi_read(cpu, bus, cycle, cpu.Y, and)
 }
 
-and_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+and_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	indx_read(cpu, bus, cycle, and)
 }
 
-and_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+and_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 	indy_read(cpu, bus, cycle, and)
 }
 
-asl :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Arithmetic Shift Left
+asl :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // Arithmetic Shift Left
     cpu.P.C = value^ >> 7
     value^ <<= 1
 
@@ -93,45 +93,45 @@ asl :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Arithmetic Shift Left
     cpu.P.N = value^ >> 7
 }
 
-asl_a :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { 
+asl_a :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { 
     switch cycle {
     case 2:
         // Dummy read next instruction byte, perform action, done
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
         asl(cpu, bus, &cpu.A)
         cpu_instruction_done(cpu)
     }
 }
   
-asl_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { 
+asl_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { 
     zpg_read_modify_write(cpu, bus, cycle, asl)
 }
 
-asl_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { 
+asl_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { 
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, asl)
 }
 
-asl_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { 
+asl_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { 
     abs_read_modify_write(cpu, bus, cycle, asl)
 }
 
-asl_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { 
+asl_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { 
     absi_read_modify_write(cpu, bus, cycle, cpu.X, asl)
 }
 
-bcc :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Branch if Carry Clear
+bcc :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Carry Clear
     rel(cpu, bus, cycle, cpu.P.C == 0)
 }
 
-bcs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Branch if Carry Set
+bcs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Carry Set
     rel(cpu, bus, cycle, cpu.P.C == 1)
 }
 
-beq :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Branch if Equal
+beq :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Equal
     rel(cpu, bus, cycle, cpu.P.Z == 1)
 }
 
-bit :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Bit test
+bit :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Bit test
     result := cpu.A & value
 
     cpu.P.Z = result == 0 ? 1 : 0
@@ -139,31 +139,31 @@ bit :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Bit test
     cpu.P.N = value >> 7 
 }
 
-bit_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+bit_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, bit)
 }
 
-bit_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+bit_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, bit)
 }
 
-bmi :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Branch if Minus
+bmi :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Minus
     rel(cpu, bus, cycle, cpu.P.N == 1)
 }
 
-bne :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Branch if Not Equal
+bne :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Not Equal
     rel(cpu, bus, cycle, cpu.P.Z == 0)
 }
 
-bpl :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Branch if Plus
+bpl :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Plus
     rel(cpu, bus, cycle, cpu.P.N == 0)
 }
 
-brk :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Break
+brk :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Break
     switch cycle {
     case 2:
         // Dummy read operand, increment PC
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
     case 3:
         // Push PCH on the stack
@@ -179,37 +179,37 @@ brk :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Break
         stack_push(cpu, bus, byte(p))
     case 6:
         // Fetch PCL
-        cpu.PCL = bus_read(bus, 0xFFFE)
+        cpu.PCL = cpu_bus_read(bus, 0xFFFE)
     case 7:
         // Fetch PCH, set flags, done
-        cpu.PCH = bus_read(bus, 0xFFFF)
+        cpu.PCH = cpu_bus_read(bus, 0xFFFF)
         cpu.P.I = 1
         cpu_instruction_done(cpu)
     }
 }
 
-bvc :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Branch if Overflow Clear
+bvc :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Overflow Clear
     rel(cpu, bus, cycle, cpu.P.V == 0)
 }
 
-bvs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Branch if Overflow Set
+bvs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Overflow Set
     rel(cpu, bus, cycle, cpu.P.V == 1)
 }
 
-clc :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Clear Carry
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.C = 0 })
+clc :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Carry
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.C = 0 })
 }
 
-cld :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Clear Decimal
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.D = 0 })
+cld :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Decimal
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.D = 0 })
 }
 
-cli :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Clear Interrupt Disable
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.I = 0 })
+cli :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Interrupt Disable
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 0 })
 }
 
-clv :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Clear Overflow
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.V = 0 })
+clv :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Overflow
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.V = 0 })
 }
 
 compare :: proc(cpu: ^CPU, a, b: u8) {
@@ -220,207 +220,207 @@ compare :: proc(cpu: ^CPU, a, b: u8) {
     cpu.P.N = result >> 7 
 }
 
-cmp :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Compare A
+cmp :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Compare A
     compare(cpu, cpu.A, value)
 }
 
-cmp_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cmp_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     imm(cpu, bus, cycle, cmp)
 }
 
-cmp_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cmp_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, cmp)
 }
 
-cmp_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cmp_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read(cpu, bus, cycle, cpu.X, cmp)
 }
 
-cmp_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cmp_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, cmp)
 }
 
-cmp_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cmp_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.X, cmp)
 }
 
-cmp_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cmp_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.Y, cmp)
 }
 
-cmp_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cmp_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read(cpu, bus, cycle, cmp)
 }
 
-cmp_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cmp_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read(cpu, bus, cycle, cmp)
 }
 
-cpx :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Compare X
+cpx :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Compare X
     compare(cpu, cpu.X, value)
 }
 
-cpx_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cpx_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     imm(cpu, bus, cycle, cpx)
 }
 
-cpx_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cpx_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, cpx)
 }
 
-cpx_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cpx_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, cpx)
 }
 
-cpy :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Compare Y
+cpy :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Compare Y
     compare(cpu, cpu.Y, value)
 }
 
-cpy_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cpy_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     imm(cpu, bus, cycle, cpy)
 }
 
-cpy_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cpy_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, cpy)
 }
 
-cpy_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+cpy_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, cpy)
 }
 
-dec :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Decrement Memory
+dec :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // Decrement Memory
     value^ -= 1
 
     cpu.P.Z = value^ == 0 ? 1 : 0
     cpu.P.N = value^ >> 7
 }
 
-dec_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dec_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, dec)
 }
 
-dec_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dec_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, dec)
 }
 
-dec_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dec_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, dec)
 }
 
-dec_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dec_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, dec)
 }
 
-dex :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Decrement X
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { dec(cpu, bus, &cpu.X) })
+dex :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Decrement X
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { dec(cpu, bus, &cpu.X) })
 }
 
-dey :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Decrement Y
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { dec(cpu, bus, &cpu.Y) })
+dey :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Decrement Y
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { dec(cpu, bus, &cpu.Y) })
 }
 
-eor :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Bitwise Exclusive OR
+eor :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Bitwise Exclusive OR
     cpu.A ~= value
 
     cpu.P.Z = cpu.A == 0 ? 1 : 0
     cpu.P.N = cpu.A >> 7
 }
 
-eor_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+eor_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     imm(cpu, bus, cycle, eor)
 }
 
-eor_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+eor_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, eor)
 }
 
-eor_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+eor_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read(cpu, bus, cycle, cpu.X, eor)
 }
 
-eor_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+eor_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, eor)
 }
 
-eor_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+eor_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.X, eor)
 }
 
-eor_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+eor_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.Y, eor)
 }
 
-eor_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+eor_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read(cpu, bus, cycle, eor)
 }
 
-eor_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+eor_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read(cpu, bus, cycle, eor)
 }
 
-inc :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Increment Memory
+inc :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // Increment Memory
     value^ += 1
 
     cpu.P.Z = value^ == 0 ? 1 : 0
     cpu.P.N = value^ >> 7
 }
 
-inc_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+inc_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, inc)
 }
 
-inc_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+inc_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, inc)
 }
 
-inc_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+inc_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, inc)
 }
 
-inc_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+inc_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, inc)
 }
 
-inx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Increment X
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { inc(cpu, bus, &cpu.X) })
+inx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Increment X
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { inc(cpu, bus, &cpu.X) })
 }
 
-iny :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Increment Y
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { inc(cpu, bus, &cpu.Y) })
+iny :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Increment Y
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { inc(cpu, bus, &cpu.Y) })
 }
 
-jmp_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Jump Absolute
+jmp_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Jump Absolute
     switch cycle {
     case 2:
         // Fetch low address byte, increment PC
-        cpu.instruction_operand = bus_read(bus, cpu.PC)
+        cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
     case 3:
         // Copy low address byte to PCL, fetch high address byte to PCH, done
-        cpu.PCH = bus_read(bus, cpu.PC)
+        cpu.PCH = cpu_bus_read(bus, cpu.PC)
         cpu.PCL = cpu.instruction_operand
         cpu_instruction_done(cpu)
     }
 }
 
 // Jump Indirect (operand is a 16-bit address of a low byte of the effective address)
-jmp_ind :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+jmp_ind :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2:
         // Fetch pointer address low, increment PC
-        cpu.instruction_operands.bytes[LOW] = bus_read(bus, cpu.PC)
+        cpu.instruction_operands.bytes[LOW] = cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
     case 3:
         // Fetch pointer address high, increment PC
-        cpu.instruction_operands.bytes[HIGH] = bus_read(bus, cpu.PC)
+        cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
     case 4:
         // Fetch low address to latch
-        cpu.instruction_temp_value = bus_read(bus, cpu.instruction_operands.whole)
+        cpu.instruction_temp_value = cpu_bus_read(bus, cpu.instruction_operands.whole)
     case 5:
         // Fetch PCH, copy latch to PCL, done
         cpu.instruction_operands.bytes[LOW] += 1 // Deliberately ignore page crossing and just increment the low byte (hardware bug)
-        cpu.PCH = bus_read(bus, cpu.instruction_operands.whole)
+        cpu.PCH = cpu_bus_read(bus, cpu.instruction_operands.whole)
 
         cpu.PCL = cpu.instruction_temp_value
 
@@ -428,15 +428,15 @@ jmp_ind :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     }
 }
 
-jsr :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Jump to Subroutine
+jsr :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Jump to Subroutine
     switch cycle {
     case 2:
         // Fetch low address byte, increment PC
-        cpu.instruction_operand = bus_read(bus, cpu.PC)
+        cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
     case 3:
         // Internal operation - dummy read the stack
-        bus_read(bus, STACK_START + u16(cpu.S))
+        cpu_bus_read(bus, STACK_START + u16(cpu.S))
     case 4:
         // Push PCH on stack
         stack_push(cpu, bus, cpu.PCH)
@@ -445,7 +445,7 @@ jsr :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Jump to Subroutine
         stack_push(cpu, bus, cpu.PCL)
     case 6:
         // Copy low address byte to PCL, fetch high address byte to PCH, done
-        cpu.PCH = bus_read(bus, cpu.PC)
+        cpu.PCH = cpu_bus_read(bus, cpu.PC)
         cpu.PCL = cpu.instruction_operand
 
         cpu_instruction_done(cpu)
@@ -459,91 +459,91 @@ load :: proc(cpu: ^CPU, target: ^u8, value: u8) {
     cpu.P.N = target^ >> 7
 }
 
-lda :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Load A
+lda :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Load A
     load(cpu, &cpu.A, value)
 }
 
-lda_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lda_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     imm(cpu, bus, cycle, lda)
 }
 
-lda_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lda_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, lda)
 }
 
-lda_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lda_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read(cpu, bus, cycle, cpu.X, lda)
 }
 
-lda_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lda_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, lda)
 }
 
-lda_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lda_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.X, lda)
 }
 
-lda_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lda_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.Y, lda)
 }
 
-lda_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lda_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read(cpu, bus, cycle, lda)
 }
 
-lda_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lda_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read(cpu, bus, cycle, lda)
 }
 
-ldx :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Load X
+ldx :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Load X
     load(cpu, &cpu.X, value)
 }
 
-ldx_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldx_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     imm(cpu, bus, cycle, ldx)
 }
 
-ldx_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldx_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, ldx)
 }
 
-ldx_zpgy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldx_zpgy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read(cpu, bus, cycle, cpu.Y, ldx)
 }
 
-ldx_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldx_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, ldx)
 }
 
-ldx_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldx_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.Y, ldx)
 }
 
-ldy :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Load Y
+ldy :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Load Y
     load(cpu, &cpu.Y, value)
 }
 
-ldy_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldy_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     imm(cpu, bus, cycle, ldy)
 }
 
-ldy_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldy_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, ldy)
 }
 
-ldy_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldy_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read(cpu, bus, cycle, cpu.X, ldy)
 }
 
-ldy_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldy_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, ldy)
 }
 
-ldy_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ldy_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.X, ldy)
 }
 
-lsr :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Logical Shift Right
+lsr :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // Logical Shift Right
     cpu.P.C = value^ & 1
     value^ >>= 1
 
@@ -551,74 +551,74 @@ lsr :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Logical Shift Right
     cpu.P.N = 0
 }
 
-lsr_a :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { lsr(cpu, bus, &cpu.A) })
+lsr_a :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { lsr(cpu, bus, &cpu.A) })
 }
 
-lsr_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lsr_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, lsr)
 }
 
-lsr_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lsr_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, lsr)
 }
 
-lsr_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lsr_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, lsr)
 }
 
-lsr_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lsr_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, lsr)
 }
 
-nop :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // No Operation
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { })
+nop :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // No Operation
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { })
 }
 
-ora :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Bitwise OR
+ora :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Bitwise OR
     cpu.A |= value
 
     cpu.P.Z = cpu.A == 0 ? 1 : 0
     cpu.P.N = cpu.A >> 7
 }
 
-ora_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ora_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     imm(cpu, bus, cycle, ora)
 }
 
-ora_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ora_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, ora)
 }
 
-ora_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ora_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read(cpu, bus, cycle, cpu.X, ora)
 }
 
-ora_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ora_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, ora)
 }
 
-ora_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ora_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.X, ora)
 }
 
-ora_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ora_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.Y, ora)
 }
 
-ora_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ora_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read(cpu, bus, cycle, ora)
 }
 
-ora_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ora_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read(cpu, bus, cycle, ora)
 }
 
-pha :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Push A
+pha :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Push A
     switch cycle {
     case 2:
         // Dummy read next instruction byte
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
     case 3:
         // Push A on stack, done
         stack_push(cpu, bus, cpu.A)
@@ -626,11 +626,11 @@ pha :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Push A
     }
 }
 
-php :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Push P
+php :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Push P
     switch cycle {
     case 2:
         // Dummy read next instruction byte
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
     case 3:
         // Push P on stack with B flag set, done
         p := cpu.P
@@ -641,14 +641,14 @@ php :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Push P
     }
 }
 
-pla :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Pull A
+pla :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Pull A
     switch cycle {
     case 2:
         // Dummy read next instruction byte
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
     case 3:
         // Dummy read on the stack
-        bus_read(bus, STACK_START + u16(cpu.S))
+        cpu_bus_read(bus, STACK_START + u16(cpu.S))
     case 4:
         // Pull A from stack, set flags, done
         cpu.A = stack_pop(cpu, bus)
@@ -660,14 +660,14 @@ pla :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Pull A
     }
 }
 
-plp :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Pull P
+plp :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Pull P
     switch cycle {
     case 2:
         // Dummy read next instruction byte
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
     case 3:
         // Dummy read on the stack
-        bus_read(bus, STACK_START + u16(cpu.S))
+        cpu_bus_read(bus, STACK_START + u16(cpu.S))
     case 4:
         // Pull P from stack ignoring/preserving bits 4 and 5, done
         p := (u8(cpu.P) & 0b00110000) | (stack_pop(cpu, bus) & 0b11001111)
@@ -677,7 +677,7 @@ plp :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Pull P
     }
 }
 
-rol :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Rotate Left (through Carry)
+rol :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // Rotate Left (through Carry)
     c := cpu.P.C
     cpu.P.C = value^ >> 7
     value^ = (value^ << 1) | c
@@ -686,27 +686,27 @@ rol :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Rotate Left (through Carry)
     cpu.P.N = value^ >> 7
 }
 
-rol_a :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { rol(cpu, bus, &cpu.A) })
+rol_a :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { rol(cpu, bus, &cpu.A) })
 }
 
-rol_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rol_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, rol)
 }
 
-rol_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rol_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, rol)
 }
 
-rol_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rol_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, rol)
 }
 
-rol_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rol_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, rol)
 }
 
-ror :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Rotate Right (through Carry)
+ror :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // Rotate Right (through Carry)
     c := cpu.P.C
     cpu.P.C = value^ & 1
     value^ = (value^ >> 1) | (c << 7)
@@ -715,34 +715,34 @@ ror :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // Rotate Right (through Carry)
     cpu.P.N = c
 }
 
-ror_a :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { ror(cpu, bus, &cpu.A) })
+ror_a :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { ror(cpu, bus, &cpu.A) })
 }
 
-ror_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ror_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, ror)
 }
 
-ror_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ror_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, ror)
 }
 
-ror_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ror_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, ror)
 }
 
-ror_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+ror_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, ror)
 }
 
-rti :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Return from Interrupt
+rti :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Return from Interrupt
     switch cycle {
     case 2:
         // Dummy read next instruction byte
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
     case 3:
         // Dummy read on the stack
-        bus_read(bus, STACK_START + u16(cpu.S))
+        cpu_bus_read(bus, STACK_START + u16(cpu.S))
     case 4:
         // Pull P from stack ignoring/preserving bits 4 and 5
         p := (u8(cpu.P) & 0b00110000) | (stack_pop(cpu, bus) & 0b11001111)
@@ -758,14 +758,14 @@ rti :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Return from Interrupt
     }
 }
 
-rts :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Return from Subroutine
+rts :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Return from Subroutine
     switch cycle {
     case 2:
         // Dummy read next instruction byte
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
     case 3:
         // Dummy read on the stack
-        bus_read(bus, STACK_START + u16(cpu.S))
+        cpu_bus_read(bus, STACK_START + u16(cpu.S))
     case 4:
         // Pull PCL from stack
         cpu.PCL = stack_pop(cpu, bus)
@@ -774,111 +774,111 @@ rts :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Return from Subroutine
         cpu.PCH = stack_pop(cpu, bus)
     case 6:
         // Dummy read at the PC, increment PC, done
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
         cpu_instruction_done(cpu)
     }
 }
 
-sbc :: proc(cpu: ^CPU, bus: Bus, value: u8) { // Subtract with Carry
+sbc :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // Subtract with Carry
     // A = A - value - ~C, or equivalently: A = A + ~value + C 
     // Even on the hardware level, SBC is implemented using ADC, just with inverted value
     adc(cpu, bus, ~value)
 }
 
-sbc_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sbc_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     imm(cpu, bus, cycle, sbc)
 }
 
-sbc_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sbc_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, sbc)
 }
 
-sbc_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sbc_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read(cpu, bus, cycle, cpu.X, sbc)
 }
 
-sbc_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sbc_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, sbc)
 }
 
-sbc_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sbc_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.X, sbc)
 }
 
-sbc_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sbc_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.Y, sbc)
 }
 
-sbc_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sbc_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read(cpu, bus, cycle, sbc)
 }
 
-sbc_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sbc_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read(cpu, bus, cycle, sbc)
 }
 
-sec :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Set Carry
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.C = 1 })
+sec :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Set Carry
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.C = 1 })
 }
 
-sed :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Set Decimal
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.D = 1 })
+sed :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Set Decimal
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.D = 1 })
 }
 
-sei :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Set Interrupt Disable
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.P.I = 1 })
+sei :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Set Interrupt Disable
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 1 })
 }
 
-sta_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Store A
+sta_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Store A
     zpg_write(cpu, bus, cycle, cpu.A)
 }
 
-sta_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sta_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_write(cpu, bus, cycle, cpu.X, cpu.A)
 }
 
-sta_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sta_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_write(cpu, bus, cycle, cpu.A)
 }
 
-sta_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sta_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_write(cpu, bus, cycle, cpu.X, cpu.A)
 }
 
-sta_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sta_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_write(cpu, bus, cycle, cpu.Y, cpu.A)
 }
 
-sta_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sta_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_write(cpu, bus, cycle, cpu.A)
 }
 
-sta_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sta_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_write(cpu, bus, cycle, cpu.A)
 }
 
-stx_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Store X
+stx_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Store X
     zpg_write(cpu, bus, cycle, cpu.X)
 }
 
-stx_zpgy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { 
+stx_zpgy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { 
     zpgi_write(cpu, bus, cycle, cpu.Y, cpu.X)
 }
 
-stx_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+stx_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_write(cpu, bus, cycle, cpu.X)
 }
 
-sty_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Store Y
+sty_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Store Y
     zpg_write(cpu, bus, cycle, cpu.Y)
 }
 
-sty_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { 
+sty_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { 
     zpgi_write(cpu, bus, cycle, cpu.X, cpu.Y)
 }
 
-sty_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sty_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_write(cpu, bus, cycle, cpu.Y)
 }
 
@@ -889,67 +889,67 @@ transfer :: proc(cpu: ^CPU, target: ^u8, source: u8) {
     cpu.P.N = source >> 7
 }
 
-tax :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer A to X
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.X, cpu.A) })
+tax :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Transfer A to X
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { transfer(cpu, &cpu.X, cpu.A) })
 }
 
-tay :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer A to Y
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.Y, cpu.A) })
+tay :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Transfer A to Y
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { transfer(cpu, &cpu.Y, cpu.A) })
 }
 
-tsx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer S to X
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.X, cpu.S) })
+tsx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Transfer S to X
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { transfer(cpu, &cpu.X, cpu.S) })
 }
 
-txa :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer X to A
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.A, cpu.X) })
+txa :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Transfer X to A
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { transfer(cpu, &cpu.A, cpu.X) })
 }
 
-txs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer X to S
+txs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Transfer X to S
     // In contrast to other transfer instructions, this one does not set flags
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { cpu.S = cpu.X })
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.S = cpu.X })
 }
 
-tya :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // Transfer Y to A
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { transfer(cpu, &cpu.A, cpu.Y) })
+tya :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Transfer Y to A
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { transfer(cpu, &cpu.A, cpu.Y) })
 }
 
 // Illegal opcodes
 
-nop_implied :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus) { })
+nop_implied :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { })
 }
 
-nop_imm :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+nop_imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { })
 }
 
-nop_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-    zpg_read(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+nop_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+    zpg_read(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { })
 }
 
-nop_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-    zpgi_read(cpu, bus, cycle, cpu.X, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+nop_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+    zpgi_read(cpu, bus, cycle, cpu.X, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { })
 }
 
-nop_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-    abs_read(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+nop_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+    abs_read(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { })
 }
 
-nop_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
-    absi_read(cpu, bus, cycle, cpu.X, proc(cpu: ^CPU, bus: Bus, value: u8) { })
+nop_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+    absi_read(cpu, bus, cycle, cpu.X, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { })
 }
 
-jam :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+jam :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2:
         // These bus reads are added in order to pass the CPU tests, I assume those are done by real hardware
 
         // Read the next instruction byte
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
     case 3:
         // Re-read the next instruction byte
-        bus_read(bus, cpu.PC)
+        cpu_bus_read(bus, cpu.PC)
 
         // Decrement the PC - this instruction must leave the CPU state unchanged, including the PC
         cpu.PC -= 1
@@ -961,22 +961,22 @@ jam :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     }
 }
 
-alr :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // AND + LSR
-    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+alr :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // AND + LSR
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { 
         and(cpu, bus, value)
         lsr(cpu, bus, &cpu.A)
     })
 }
 
-anc :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // AND + set result bit 7 to C
-    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+anc :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // AND + set result bit 7 to C
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { 
         and(cpu, bus, value)
         cpu.P.C = cpu.A >> 7
     })
 }
 
-ane :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // (A OR CONST) AND X AND value -> A
-    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+ane :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // (A OR CONST) AND X AND value -> A
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { 
         // This instruction is highly unstable because it depends on a constant the value of which 
         // is ultimately random and depends on temperature, CPU chip series, and potentially other factors.
         // Using 0xEE as the constant's value in order to pass the tests, but on real hardware the constant will 
@@ -988,8 +988,8 @@ ane :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // (A OR CONST) AND X AND value ->
     })
 }
 
-arr :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // AND + ROR
-    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+arr :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // AND + ROR
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { 
         // This opcode activates some parts related to ADC, leading to weird side effects. Full description:
         // In Binary mode (D flag clear), the instruction effectively does an AND between the accumulator and 
         // the immediate parameter, and then shifts the accumulator to the right, copying the C flag to the 8th bit. 
@@ -1010,75 +1010,75 @@ arr :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // AND + ROR
     })
 }
 
-dcp :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // DEC + CMP
+dcp :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // DEC + CMP
     // Decrements the operand and then compares the result to the accumulator
     dec(cpu, bus, value)
     compare(cpu, cpu.A, value^)
 }
 
-dcp_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dcp_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, dcp)
 }
 
-dcp_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dcp_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, dcp)
 }
 
-dcp_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dcp_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, dcp)
 }
 
-dcp_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dcp_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, dcp)
 }
 
-dcp_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dcp_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.Y, dcp)
 }
 
-dcp_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dcp_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read_modify_write(cpu, bus, cycle, dcp)
 }
 
-dcp_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+dcp_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read_modify_write(cpu, bus, cycle, dcp)
 }
 
-isc :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // INC + SBC
+isc :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // INC + SBC
     inc(cpu, bus, value)
     sbc(cpu, bus, value^)
 }
 
-isc_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+isc_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, isc)
 }
 
-isc_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+isc_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, isc)
 }
 
-isc_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+isc_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, isc)
 }
 
-isc_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+isc_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, isc)
 }
 
-isc_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+isc_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.Y, isc)
 }
 
-isc_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+isc_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read_modify_write(cpu, bus, cycle, isc)
 }
 
-isc_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+isc_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read_modify_write(cpu, bus, cycle, isc)
 }
 
-las_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // LDA/TSX (kinda)
-    absi_read(cpu, bus, cycle, cpu.Y, proc(cpu: ^CPU, bus: Bus, value: u8) {
+las_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // LDA/TSX (kinda)
+    absi_read(cpu, bus, cycle, cpu.Y, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) {
         result := value & cpu.S
 
         cpu.A = result
@@ -1090,37 +1090,37 @@ las_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // LDA/TSX (kinda)
     })
 }
 
-lax :: proc(cpu: ^CPU, bus: Bus, value: u8) { // LDA + LDX
+lax :: proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { // LDA + LDX
     lda(cpu, bus, value)
     ldx(cpu, bus, value)
 }
 
-lax_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lax_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read(cpu, bus, cycle, lax)
 }
 
-lax_zpgy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lax_zpgy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read(cpu, bus, cycle, cpu.Y, lax)
 }
 
-lax_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lax_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read(cpu, bus, cycle, lax)
 }
 
-lax_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lax_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read(cpu, bus, cycle, cpu.Y, lax)
 }
 
-lax_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lax_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read(cpu, bus, cycle, lax)
 }
 
-lax_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+lax_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read(cpu, bus, cycle, lax)
 }
 
-lxa :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // LAX immediate
-    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+lxa :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // LAX immediate
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { 
         // This instruction includes an environment-dependent magic constant, thus highly unstable.
         // Using 0xEE as a magic constant to pass the tests.
         result := (cpu.A | 0xEE) & value
@@ -1133,98 +1133,98 @@ lxa :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // LAX immediate
     })
 }
 
-rla :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // ROL + AND
+rla :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // ROL + AND
     rol(cpu, bus, value)
     and(cpu, bus, value^)
 }
 
-rla_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rla_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, rla)
 }
 
-rla_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rla_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, rla)
 }
 
-rla_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rla_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, rla)
 }
 
-rla_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rla_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, rla)
 }
 
-rla_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rla_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.Y, rla)
 }
 
-rla_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rla_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read_modify_write(cpu, bus, cycle, rla)
 }
 
-rla_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rla_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read_modify_write(cpu, bus, cycle, rla)
 }
 
-rra :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // ROR + ADC
+rra :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // ROR + ADC
     ror(cpu, bus, value)
     adc(cpu, bus, value^)
 }
 
-rra_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rra_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, rra)
 }
 
-rra_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rra_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, rra)
 }
 
-rra_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rra_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, rra)
 }
 
-rra_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rra_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, rra)
 }
 
-rra_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rra_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.Y, rra)
 }
 
-rra_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rra_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read_modify_write(cpu, bus, cycle, rra)
 }
 
-rra_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+rra_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read_modify_write(cpu, bus, cycle, rra)
 }
 
 // A and X are put on the bus at the same time (resulting effectively in an AND operation) and stored in M
-sax_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sax_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_write(cpu, bus, cycle, cpu.A & cpu.X)
 }
 
-sax_zpgy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sax_zpgy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_write(cpu, bus, cycle, cpu.Y, cpu.A & cpu.X)
 }
 
-sax_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sax_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_write(cpu, bus, cycle, cpu.A & cpu.X)
 }
 
-sax_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sax_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_write(cpu, bus, cycle, cpu.A & cpu.X)
 }
 
-sbx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // CMP and DEX at once, sets flags like CMP
-    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: Bus, value: u8) { 
+sbx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // CMP and DEX at once, sets flags like CMP
+    imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { 
         ax := cpu.A & cpu.X
         compare(cpu, ax, value)
         cpu.X = ax - value
     })
 }
 
-sha_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sha_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 4:
         absi_write(cpu, bus, cycle, cpu.Y, 0)
@@ -1254,7 +1254,7 @@ sha_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     }
 }
 
-sha_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sha_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 5:
         indy_write(cpu, bus, cycle, 0)
@@ -1273,7 +1273,7 @@ sha_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     }
 }
 
-shx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+shx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 4:
         absi_write(cpu, bus, cycle, cpu.Y, 0)
@@ -1292,7 +1292,7 @@ shx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     }
 }
 
-shy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+shy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 4:
         absi_write(cpu, bus, cycle, cpu.X, 0)
@@ -1311,73 +1311,73 @@ shy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     }
 }
 
-slo :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // ASL + ORA
+slo :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // ASL + ORA
     asl(cpu, bus, value)
     ora(cpu, bus, value^)
 }
 
-slo_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+slo_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, slo)
 }
 
-slo_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+slo_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, slo)
 }
 
-slo_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+slo_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, slo)
 }
 
-slo_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+slo_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, slo)
 }
 
-slo_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+slo_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.Y, slo)
 }
 
-slo_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+slo_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read_modify_write(cpu, bus, cycle, slo)
 }
 
-slo_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+slo_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read_modify_write(cpu, bus, cycle, slo)
 }
 
-sre :: proc(cpu: ^CPU, bus: Bus, value: ^u8) { // LSR + EOR
+sre :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // LSR + EOR
     lsr(cpu, bus, value)
     eor(cpu, bus, value^)
 }
 
-sre_zpg :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sre_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpg_read_modify_write(cpu, bus, cycle, sre)
 }
 
-sre_zpgx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sre_zpgx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     zpgi_read_modify_write(cpu, bus, cycle, cpu.X, sre)
 }
 
-sre_abs :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sre_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     abs_read_modify_write(cpu, bus, cycle, sre)
 }
 
-sre_absx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sre_absx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.X, sre)
 }
 
-sre_absy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sre_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     absi_read_modify_write(cpu, bus, cycle, cpu.Y, sre)
 }
 
-sre_indx :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sre_indx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indx_read_modify_write(cpu, bus, cycle, sre)
 }
 
-sre_indy :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+sre_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     indy_read_modify_write(cpu, bus, cycle, sre)
 }
 
-tas :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
+tas :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 4:
         absi_write(cpu, bus, cycle, cpu.Y, 0)
@@ -1399,6 +1399,6 @@ tas :: proc(cpu: ^CPU, bus: Bus, cycle: u8) {
     }
 }
 
-usbc :: proc(cpu: ^CPU, bus: Bus, cycle: u8) { // SBC + NOP, effectively the same as SBC
+usbc :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // SBC + NOP, effectively the same as SBC
     sbc_imm(cpu, bus, cycle)
 }

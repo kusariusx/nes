@@ -70,7 +70,7 @@ test_instructions_json :: proc(t: ^testing.T) {
                 P = CPU_Flags(tc.initial.p),
             }
 
-            bus := Test_Bus{track_memory_access = true}
+            bus := Test_CPU_Bus{track_memory_access = true}
             for el in tc.initial.ram {
                 address, value := el[0], byte(el[1])
                 bus.ram[address] = value
@@ -127,7 +127,7 @@ test_instructions_nestest :: proc(t: ^testing.T) {
     cpu.PC = 0xC000
 
     m := NROM{}
-    bus := NES_Bus{
+    bus := NES_CPU_Bus{
         rom = rom,
         mapper = &m,
     }
@@ -142,7 +142,7 @@ test_instructions_nestest :: proc(t: ^testing.T) {
             cpu_tick(&cpu, &bus)
         }
 
-        loc02, loc03 = bus_read(&bus, 0x02), bus_read(&bus, 0x03)
+        loc02, loc03 = cpu_bus_read(&bus, 0x02), cpu_bus_read(&bus, 0x03)
         instrs += 1
     }
 

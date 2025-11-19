@@ -1,46 +1,46 @@
 package main
 
-OPEN_BUS_VALUE :: 0xFF
+OPEN_CPU_BUS_VALUE :: 0xFF
 
-NES_Bus :: struct {
+NES_CPU_Bus :: struct {
 	ram: [2 * 1024]u8, // 2 KB internal RAM
 
     rom: ^ROM,
     mapper: Mapper,
 }
 
-nes_bus_read :: proc(b: ^NES_Bus, address: u16) -> u8 {
+nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16) -> u8 {
     if address >= 0x4020 && address <= 0xFFFF { // Unmapped space, let mapper handle
         value, handled := mapper_read(b.mapper, b.rom, address)
         if handled {
             return value
         }
 
-        return OPEN_BUS_VALUE
+        return OPEN_CPU_BUS_VALUE
     }
 
-    memory := nes_bus_resolve(b, address)
+    memory := nes_cpu_bus_resolve(b, address)
     if memory != nil {
         return memory^
     }
 
-    return OPEN_BUS_VALUE
+    return OPEN_CPU_BUS_VALUE
 }
 
-nes_bus_write :: proc(b: ^NES_Bus, address: u16, value: u8) {
+nes_cpu_bus_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
     if address >= 0x4020 && address <= 0xFFFF { 
         mapper_write(b.mapper, b.rom, address, value)
         return // Ignore unhandled writes
     }
 
-    memory := nes_bus_resolve(b, address)
+    memory := nes_cpu_bus_resolve(b, address)
     if memory != nil {
         memory^ = value
     }
 }
 
 // For addresses that do not need special read/write handling
-nes_bus_resolve :: proc(b: ^NES_Bus, address: u16) -> ^u8 {
+nes_cpu_bus_resolve :: proc(b: ^NES_CPU_Bus, address: u16) -> ^u8 {
     switch address {
     case 0 ..= 0x1FFF: // Internal RAM (1 real and 3 mirrors)
         effective_address := address & 0x7FF // Mask to 11 bits (2 KB)
@@ -65,7 +65,7 @@ nes_bus_resolve :: proc(b: ^NES_Bus, address: u16) -> ^u8 {
     return nil
 }
 
-Test_Bus :: struct {
+Test_CPU_Bus :: struct {
     ram: [0x10000]u8,
     
     track_memory_access: bool,
@@ -76,7 +76,7 @@ Test_Bus :: struct {
     },
 }
 
-test_bus_read :: proc(b: ^Test_Bus, address: u16) -> u8 {
+test_cpu_bus_read :: proc(b: ^Test_CPU_Bus, address: u16) -> u8 {
     res := b.ram[address]
 
     if b.track_memory_access {
@@ -92,7 +92,7 @@ test_bus_read :: proc(b: ^Test_Bus, address: u16) -> u8 {
     return res
 }
 
-test_bus_write :: proc(b: ^Test_Bus, address: u16, value: u8) {
+test_cpu_bus_write :: proc(b: ^Test_CPU_Bus, address: u16, value: u8) {
     b.ram[address] = value
         
     if b.track_memory_access {
@@ -106,28 +106,28 @@ test_bus_write :: proc(b: ^Test_Bus, address: u16, value: u8) {
     }
 }
 
-Bus :: union {
-    ^NES_Bus,
-    ^Test_Bus,
+CPU_Bus :: union {
+    ^NES_CPU_Bus,
+    ^Test_CPU_Bus,
 }
 
-bus_read :: proc(b: Bus, address: u16) -> u8 {
+cpu_bus_read :: proc(b: CPU_Bus, address: u16) -> u8 {
     switch bus in b {
-    case ^NES_Bus:
-        return nes_bus_read(bus, address)
-    case ^Test_Bus:
-        return test_bus_read(bus, address)
+    case ^NES_CPU_Bus:
+        return nes_cpu_bus_read(bus, address)
+    case ^Test_CPU_Bus:
+        return test_cpu_bus_read(bus, address)
     }
 
     // Should never happen since switch is exhaustive
-    return OPEN_BUS_VALUE
+    return OPEN_CPU_BUS_VALUE
 }
 
-bus_write :: proc(b: Bus, address: u16, value: u8) {
+cpu_bus_write :: proc(b: CPU_Bus, address: u16, value: u8) {
     switch bus in b {
-    case ^NES_Bus:
-        nes_bus_write(bus, address, value)
-    case ^Test_Bus:
-        test_bus_write(bus, address, value)
+    case ^NES_CPU_Bus:
+        nes_cpu_bus_write(bus, address, value)
+    case ^Test_CPU_Bus:
+        test_cpu_bus_write(bus, address, value)
     }
 }
