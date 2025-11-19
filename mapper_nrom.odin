@@ -4,7 +4,7 @@ NROM :: struct{
     prg_ram: [0x2000]byte,
 } 
 
-nrom_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handled: bool) {
+nrom_cpu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handled: bool) {
     switch address {
     case 0x6000 ..= 0x7FFF: // PRG-RAM
         size := rom_prg_ram_size(r) 
@@ -21,6 +21,19 @@ nrom_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handled: 
     return 0, false
 }
 
-nrom_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
+nrom_cpu_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
+    return false
+}
+
+nrom_ppu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handled: bool) {
+    switch address {
+    case 0x0000 ..= 0x1FFF:
+        return r.chr_rom[address], true
+    }
+
+    return 0, false
+}
+
+nrom_ppu_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
     return false
 }
