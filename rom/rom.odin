@@ -1,6 +1,5 @@
 package rom
 
-import "core:log"
 import "core:mem"
 
 PRG_ROM_BANK_SIZE :: 0x4000
@@ -65,7 +64,7 @@ Parsing_Error :: union {
     Parsing_Errors,
 }
 
-parse_rom :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
+parse :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
     if len(data) < 16 {
         return nil, Parsing_Errors.Invalid_Header
     }
@@ -112,7 +111,7 @@ parse_rom :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
     return
 }
 
-rom_free :: proc(rom: ^ROM) {
+free :: proc(rom: ^ROM) {
     delete(rom.prg_rom)
     delete(rom.chr_rom)
 

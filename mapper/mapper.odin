@@ -6,7 +6,7 @@ Mapper :: union {
     ^NROM,
 }
 
-mapper_read :: proc(mapper: Mapper, rom: ^rom.ROM, address: u16) -> (value: u8, read_handled: bool) {
+read :: proc(mapper: Mapper, rom: ^rom.ROM, address: u16) -> (value: u8, read_handled: bool) {
     switch m in mapper {
     case ^NROM: 
         return nrom_read(m, rom, address)
@@ -16,7 +16,7 @@ mapper_read :: proc(mapper: Mapper, rom: ^rom.ROM, address: u16) -> (value: u8, 
     return 0, false
 }
 
-mapper_write :: proc(mapper: Mapper, rom: ^rom.ROM, address: u16, value: u8) -> (write_handled: bool) {
+write :: proc(mapper: Mapper, rom: ^rom.ROM, address: u16, value: u8) -> (write_handled: bool) {
     switch m in mapper {
     case ^NROM: 
         return nrom_write(m, rom, address, value)
