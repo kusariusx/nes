@@ -1,5 +1,6 @@
 package main
 
+import "core:log"
 NROM :: struct{
     prg_ram: [0x2000]byte,
 } 
@@ -22,6 +23,21 @@ nrom_cpu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handl
 }
 
 nrom_cpu_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
+    switch address {
+    case 0x6000 ..= 0x7FFF: // PRG-RAM
+        if address >= 0x6004 {
+            log.infof("got %d - %c", value, value)
+        }
+
+        size := rom_prg_ram_size(r) 
+        if size > 0 {
+            effective_address := (address - 0x6000) % size
+            m.prg_ram[effective_address] = value
+            
+            return true
+        }
+    }
+    
     return false
 }
 
