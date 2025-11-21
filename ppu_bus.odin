@@ -5,6 +5,7 @@ PPU_OPEN_BUS_VALUE :: 0xFF
 NES_PPU_Bus :: struct {
     vram: [2 * 1024]byte,
 
+    cpu: ^CPU, // For requesting interrupts
     rom: ^ROM,
     mapper: Mapper,
 }
