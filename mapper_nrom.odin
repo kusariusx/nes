@@ -1,8 +1,10 @@
 package main
 
 import "core:log"
+
 NROM :: struct{
     prg_ram: [0x2000]byte,
+    chr_ram: [0x2000]byte,
 } 
 
 nrom_cpu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handled: bool) {
@@ -25,9 +27,9 @@ nrom_cpu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handl
 nrom_cpu_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
     switch address {
     case 0x6000 ..= 0x7FFF: // PRG-RAM
-        if address >= 0x6004 {
-            log.infof("got %d - %c", value, value)
-        }
+        // if address >= 0x6004 {
+        //     log.infof("got %d - %c", value, value)
+        // }
 
         size := rom_prg_ram_size(r) 
         if size > 0 {
@@ -44,6 +46,10 @@ nrom_cpu_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_han
 nrom_ppu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handled: bool) {
     switch address {
     case 0x0000 ..= 0x1FFF:
+        if r.header.chr_rom_banks == 0 { // Cartridge uses CHR-RAM
+            return m.chr_ram[address], true
+        } 
+        
         return r.chr_rom[address], true
     }
 
@@ -51,5 +57,16 @@ nrom_ppu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handl
 }
 
 nrom_ppu_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
+    switch address {
+    case 0x0000 ..= 0x1FFF:
+        if r.header.chr_rom_banks == 0 { // Cartridge uses CHR-RAM
+            m.chr_ram[address] = value 
+            return true
+        }
+
+        // CHR-ROM is not writeable
+        return false
+    }    
+    
     return false
 }
