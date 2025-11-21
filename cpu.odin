@@ -48,9 +48,6 @@ CPU :: struct {
         using _: struct { PCL, PCH: byte },
         PC: u16,
     },
-
-	irq_pending: bool,
-	nmi_pending: bool,
 }
 
 Instruction :: struct {
@@ -58,7 +55,7 @@ Instruction :: struct {
 	handler:  proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8),
 }
 
-cpu_tick :: proc(cpu: ^CPU, bus: CPU_Bus) {
+cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	if cpu.halt {
 		// Ignore the tick if CPU is halted
 		return
@@ -75,11 +72,11 @@ cpu_tick :: proc(cpu: ^CPU, bus: CPU_Bus) {
 
 		// Check for interrupts
 		// Note: when handling interrupts, writes to PC are suppressed, hence not incrementing it
-		if cpu.nmi_pending {
-			cpu.nmi_pending = false
+		if bus.nmi_pending {
+			bus.nmi_pending = false
 			cpu.instruction = &NMI_Handler
-		} else if cpu.irq_pending && cpu.P.I == 0 {
-			cpu.irq_pending = false
+		} else if bus.irq_pending && cpu.P.I == 0 {
+			bus.irq_pending = false
 			cpu.instruction = &IRQ_Handler
 		} else {
 			// Decode instruction
@@ -95,6 +92,27 @@ cpu_tick :: proc(cpu: ^CPU, bus: CPU_Bus) {
 	cpu.instruction_cycle += 1
 }
 
+cpu_tick_test_bus :: proc(cpu: ^CPU, bus: ^Test_CPU_Bus) {
+	// For test bus, no need to check for interrupts or handle halt state
+
+	if cpu.instruction == nil {
+		opcode := cpu_bus_read(bus, cpu.PC)
+		cpu.instruction = &Instructions[opcode]
+		
+		cpu.instruction_cycle = 1
+		cpu.PC += 1
+	} else { 
+		cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
+	}
+
+	cpu.instruction_cycle += 1
+}
+
+cpu_tick :: proc {
+	cpu_tick_nes_bus,
+	cpu_tick_test_bus,
+}
+
 // Each instruction will individually command when its execution is done.
 // This is done to allow instructions to control for how many cycles they run.
 cpu_instruction_done :: proc(cpu: ^CPU) {
@@ -107,13 +125,6 @@ cpu_reset :: proc(cpu: ^CPU) {
 	
 	cpu.P.C, cpu.P.Z, cpu.P.D, cpu.P.V, cpu.P.N = 0, 0, 0, 0, 0
 	cpu.P.I, cpu.P.unused = 1, 1
-}
-
-not_implemented :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
-	opcode := cpu_bus_read(bus, cpu.PC)
-	fmt.printf("opcode %x is not implemented\n", opcode)
-
-	cpu_instruction_done(cpu) // Done after 1 cycle
 }
 
 stack_push :: proc(cpu: ^CPU, bus: CPU_Bus, value: byte) {
