@@ -11,14 +11,14 @@ PPU :: struct {
         V:  u8 | 1, // Vblank NMI enable (0: off, 1: on)
     },
     PPUMASK: bit_field u8 {
-        g: u8   | 1, // Greyscale (0: normal color, 1: greyscale)
-        m: u8   | 1, // 1: Show background in leftmost 8 pixels of screen, 0: Hide
-        M: u8   | 1, // 1: Show sprites in leftmost 8 pixels of screen, 0: Hide
-        b: u8   | 1, // 1: Enable background rendering
-        s: u8   | 1, // 1: Enable sprite rendering
-        R: u8   | 1, // Emphasize red (green on PAL/Dendy)
-        G: u8   | 1, // Emphasize green (red on PAL/Dendy)
-        B: u8   | 1, // Emphasize blue
+        g: u8 | 1, // Greyscale (0: normal color, 1: greyscale)
+        m: u8 | 1, // 1: Show background in leftmost 8 pixels of screen, 0: Hide
+        M: u8 | 1, // 1: Show sprites in leftmost 8 pixels of screen, 0: Hide
+        b: u8 | 1, // 1: Enable background rendering
+        s: u8 | 1, // 1: Enable sprite rendering
+        R: u8 | 1, // Emphasize red (green on PAL/Dendy)
+        G: u8 | 1, // Emphasize green (red on PAL/Dendy)
+        B: u8 | 1, // Emphasize blue
     },
     PPUSTATUS: bit_field u8 {
         _: u8 | 5, // PPU open bus
