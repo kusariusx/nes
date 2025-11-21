@@ -109,7 +109,7 @@ test_instructions_json :: proc(t: ^testing.T) {
         return
     }
 
-    filepath.walk("test/cpu", walk_proc, t)
+    filepath.walk("test/cpu/json", walk_proc, t)
 }
 
 @(test)
@@ -150,42 +150,41 @@ test_instructions_nestest :: proc(t: ^testing.T) {
     testing.expect_value(t, loc03, 0)
 }
 
-// @(test)
-// test_instructions_blargg :: proc(t: ^testing.T) {
-//     rom_data, ok := os.read_entire_file("test/cpu/all_instrs.nes")
-//     testing.expect_value(t, ok, true)
-//     defer delete(rom_data)
+@(test)
+test_instructions_blargg :: proc(t: ^testing.T) {
+    rom_data, ok := os.read_entire_file("test/cpu/blargg/01-basics.nes")
+    testing.expect_value(t, ok, true)
+    defer delete(rom_data)
 
-//     r, err := rom.parse(rom_data)
-//     testing.expect_value(t, err, nil)
-//     defer rom.free(r)
+    rom, err := rom_parse(rom_data)
+    testing.expect_value(t, err, nil)
+    defer rom_free(rom)
 
-//     log.info(r.header)
+    log.info(rom.header)
 
-//     cpu := CPU{}
-//     cpu_reset(&cpu)
-//     cpu.PC = 0xC000
+    cpu := CPU{}
+    cpu_reset(&cpu)
 
-//     m := mapper.NROM{}
-//     bus := NES_Bus{
-//         rom = r,
-//         mapper = &m,
-//     }
+    mapper := NROM{}
+    cpu_bus := NES_CPU_Bus{
+        rom = rom,
+        mapper = &mapper,
+    }
 
-//     buffer: [1]byte
+    cpu.PCL = cpu_bus_read(&cpu_bus, 0xFFFC)
+    cpu.PCH = cpu_bus_read(&cpu_bus, 0xFFFD)
 
-//     loc02, loc03: u8
-//     instrs := 0
-//     for cpu.PC < 0xFFFF && loc02 == 0 && loc03 == 0 && !cpu.halt {
-//         cpu_tick(&cpu, &bus)
-//         for cpu.instruction != nil {
-//             cpu_tick(&cpu, &bus)
-//         }
+    ppu := PPU{}
+    ppu_bus := NES_PPU_Bus{
+        cpu_bus = &cpu_bus,
+        rom = rom,
+        mapper = &mapper,
+    }
 
-//         loc02, loc03 = bus_read(&bus, 0x02), bus_read(&bus, 0x03)
-//         instrs += 1
-//     }
+    cpu_bus.ppu = &ppu
+    cpu_bus.ppu_bus = &ppu_bus
 
-//     testing.expect_value(t, loc02, 0)
-//     testing.expect_value(t, loc03, 0)
-// }
+    for !cpu.halt {
+        cpu_tick(&cpu, &cpu_bus)    
+    }
+}
