@@ -177,6 +177,8 @@ brk :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Break
         p.B = 1
 
         stack_push(cpu, bus, byte(p))
+
+        // TODO: implement interrupt hijacking on this cycle.
     case 6:
         // Fetch PCL
         cpu.PCL = cpu_bus_read(bus, 0xFFFE)

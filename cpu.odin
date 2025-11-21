@@ -144,6 +144,8 @@ interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, vector_lo
 		p.B = 0
 
 		stack_push(cpu, bus, byte(p))
+
+		// TODO: implement interrupt hijacking on this cycle. For BRK as well.
 	case 6:
 		// Fetch PCL, set I flag
 		cpu.PCL = cpu_bus_read(bus, vector_low)
