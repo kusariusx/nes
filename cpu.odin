@@ -48,6 +48,9 @@ CPU :: struct {
         using _: struct { PCL, PCH: byte },
         PC: u16,
     },
+
+	irq_pending: bool,
+	nmi_pending: bool,
 }
 
 Instruction :: struct {
@@ -66,12 +69,25 @@ cpu_tick :: proc(cpu: ^CPU, bus: CPU_Bus) {
 		// Start with 1 for better alignment with the documentation
 		cpu.instruction_cycle = 1
 
-		// Fetch opcode, decode instruction
+		// Fetch opcode
+		// Even when handling interrupts, this bus read is still the first cycle of the interrupt sequence
 		opcode := cpu_bus_read(bus, cpu.PC)
-		cpu.instruction = &Instructions[opcode]
 
-		// Increment PC
-		cpu.PC += 1
+		// Check for interrupts
+		// Note: when handling interrupts, writes to PC are suppressed, hence not incrementing it
+		if cpu.nmi_pending {
+			cpu.nmi_pending = false
+			cpu.instruction = &NMI_Handler
+		} else if cpu.irq_pending && cpu.P.I == 0 {
+			cpu.irq_pending = false
+			cpu.instruction = &IRQ_Handler
+		} else {
+			// Decode instruction
+			cpu.instruction = &Instructions[opcode]
+
+			// Increment PC
+			cpu.PC += 1
+		}
 	} else { // We are in a middle of executing an instruction
 		cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
 	}
@@ -109,4 +125,45 @@ stack_push :: proc(cpu: ^CPU, bus: CPU_Bus, value: byte) {
 stack_pop :: proc(cpu: ^CPU, bus: CPU_Bus) -> byte {
 	cpu.S += 1
 	return cpu_bus_read(bus, STACK_START + u16(cpu.S))
+}
+
+interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, vector_low: u16, vector_high: u16) {
+	switch cycle {
+	case 2:
+		// Dummy read from PC
+		cpu_bus_read(bus, cpu.PC)
+	case 3:
+		// Push PCH on the stack
+		stack_push(cpu, bus, cpu.PCH)
+	case 4:
+		// Push PCL on the stack
+		stack_push(cpu, bus, cpu.PCL)
+	case 5:
+		// Push P on the stack (with B flag clear)
+		p := cpu.P
+		p.B = 0
+
+		stack_push(cpu, bus, byte(p))
+	case 6:
+		// Fetch PCL, set I flag
+		cpu.PCL = cpu_bus_read(bus, vector_low)
+		cpu.P.I = 1
+	case 7:
+		// Fetch PCH, set flags, done
+		cpu.PCH = cpu_bus_read(bus, vector_high)
+		cpu_instruction_done(cpu)
+	}
+}
+
+// Ephemeral "instructions" implementing the interrupt handling sequence
+NMI_Handler := Instruction{
+	handler = proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+		interrupt_sequence_handler(cpu, bus, cycle, 0xFFFA, 0xFFFB)
+	}
+}
+
+IRQ_Handler := Instruction{
+	handler = proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+		interrupt_sequence_handler(cpu, bus, cycle, 0xFFFE, 0xFFFF)
+	}
 }
