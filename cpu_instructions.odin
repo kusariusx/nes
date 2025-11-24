@@ -1124,8 +1124,9 @@ lax_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 lxa :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // LAX immediate
     imm(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus, value: u8) { 
         // This instruction includes an environment-dependent magic constant, thus highly unstable.
-        // Using 0xEE as a magic constant to pass the tests.
-        result := (cpu.A | 0xEE) & value
+        // Note: Using 0xFF as a magic constant will pass blargg's CPU tests but fail JSON tests.
+        // In order for them to pass, use 0xEE as a magic constant.
+        result := (cpu.A | 0xFF) & value
         
         cpu.A = result
         cpu.X = result
