@@ -10,9 +10,8 @@ NROM :: struct{
 nrom_cpu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handled: bool) {
     switch address {
     case 0x6000 ..= 0x7FFF: // PRG-RAM
-        size := rom_prg_ram_size(r) 
-        if size > 0 {
-            effective_address := (address - 0x6000) % size
+        if r.header.prg_ram_size > 0 {
+            effective_address := (address - 0x6000) % r.header.prg_ram_size
             return m.prg_ram[effective_address], true
         }
     case 0x8000 ..= 0xFFFF: // PRG-ROM
@@ -27,13 +26,8 @@ nrom_cpu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handl
 nrom_cpu_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
     switch address {
     case 0x6000 ..= 0x7FFF: // PRG-RAM
-        // if address >= 0x6004 {
-        //     log.infof("got %d - %c", value, value)
-        // }
-
-        size := rom_prg_ram_size(r) 
-        if size > 0 {
-            effective_address := (address - 0x6000) % size
+        if r.header.prg_ram_size > 0 {
+            effective_address := (address - 0x6000) % r.header.prg_ram_size
             m.prg_ram[effective_address] = value
             
             return true
@@ -49,7 +43,7 @@ nrom_ppu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handl
         if r.header.chr_rom_banks == 0 { // Cartridge uses CHR-RAM
             return m.chr_ram[address], true
         } 
-        
+
         return r.chr_rom[address], true
     }
 
