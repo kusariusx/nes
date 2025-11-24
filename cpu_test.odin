@@ -31,6 +31,11 @@ test_instructions_json :: proc(t: ^testing.T) {
             return
         }
 
+        // Ignore tests for magic constant-dependent instruction "lxa #"
+        if info.name == "ab.json" {
+            return
+        }
+
         data, ok := os.read_entire_file(info.fullpath)
         if !ok {
             return
@@ -152,39 +157,66 @@ test_instructions_nestest :: proc(t: ^testing.T) {
 
 @(test)
 test_instructions_blargg :: proc(t: ^testing.T) {
-    rom_data, ok := os.read_entire_file("test/cpu/blargg/01-basics.nes")
-    testing.expect_value(t, ok, true)
-    defer delete(rom_data)
+    walk_proc :: proc(info: os.File_Info, in_err: os.Error, user_data: rawptr) -> (walk_err: os.Error, skip_dir: bool) {
+        if info.is_dir || !strings.ends_with(info.name, ".nes") {
+            return
+        }
 
-    rom, err := rom_parse(rom_data)
-    testing.expect_value(t, err, nil)
-    defer rom_free(rom)
+        t := cast(^testing.T)user_data
+        
+        rom_data, ok := os.read_entire_file(info.fullpath)
+        testing.expect_value(t, ok, true)
+        defer delete(rom_data)
 
-    log.info(rom.header)
+        rom, err := rom_parse(rom_data)
+        testing.expect_value(t, err, nil)
+        defer rom_free(rom)
 
-    cpu := CPU{}
-    cpu_reset(&cpu)
+        cpu := CPU{}
+        cpu_reset(&cpu)
 
-    mapper := NROM{}
-    cpu_bus := NES_CPU_Bus{
-        rom = rom,
-        mapper = &mapper,
+        mapper := NROM{}
+        cpu_bus := NES_CPU_Bus{
+            rom = rom,
+            mapper = &mapper,
+        }
+
+        cpu.PCL = cpu_bus_read(&cpu_bus, 0xFFFC)
+        cpu.PCH = cpu_bus_read(&cpu_bus, 0xFFFD)
+
+        ppu := PPU{}
+        ppu_bus := NES_PPU_Bus{
+            cpu_bus = &cpu_bus,
+            rom = rom,
+            mapper = &mapper,
+        }
+
+        cpu_bus.ppu = &ppu
+        cpu_bus.ppu_bus = &ppu_bus
+
+        test_result_loc :: 0x6000
+
+        cpu_bus_write(&cpu_bus, test_result_loc, 0x80) // Test is running
+        for cpu_bus_read(&cpu_bus, test_result_loc) == 0x80  {
+            cpu_tick(&cpu, &cpu_bus) 
+        }
+
+        test_ok := true
+
+        // Validate signature indicating that the test result is valid
+        test_ok &&= testing.expect_value(t, cpu_bus_read(&cpu_bus, 0x6001), 0xDE)
+        test_ok &&= testing.expect_value(t, cpu_bus_read(&cpu_bus, 0x6002), 0xB0)
+        test_ok &&= testing.expect_value(t, cpu_bus_read(&cpu_bus, 0x6003), 0x61)
+
+        // Validate the test result - value 0 means the test passed
+        test_ok &&= testing.expect_value(t, cpu_bus_read(&cpu_bus, test_result_loc), 0)
+
+        if !test_ok {
+            log.fatalf("test %s has failed", info.name)
+        }
+
+        return
     }
 
-    cpu.PCL = cpu_bus_read(&cpu_bus, 0xFFFC)
-    cpu.PCH = cpu_bus_read(&cpu_bus, 0xFFFD)
-
-    ppu := PPU{}
-    ppu_bus := NES_PPU_Bus{
-        cpu_bus = &cpu_bus,
-        rom = rom,
-        mapper = &mapper,
-    }
-
-    cpu_bus.ppu = &ppu
-    cpu_bus.ppu_bus = &ppu_bus
-
-    for !cpu.halt {
-        cpu_tick(&cpu, &cpu_bus)    
-    }
+    filepath.walk("test/cpu/blargg-singles", walk_proc, t)
 }
