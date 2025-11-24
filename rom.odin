@@ -42,6 +42,9 @@ ROM_Header :: struct { // First 16-bytes of the ROM
     format_specific_flags: union {
         INES_Header_Data,
     },
+
+    // Precalculated format-agnostic info
+    prg_ram_size: u16,
 }
 
 ROM :: struct {
@@ -108,6 +111,9 @@ rom_parse :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
     copy(rom.chr_rom, data[ptr:ptr+chr_rom_size])
     ptr += chr_rom_size
 
+    // Precalculate some info for later use
+    rom.header.prg_ram_size = rom_prg_ram_size(rom)
+
     return
 }
 
@@ -118,7 +124,6 @@ rom_free :: proc(rom: ^ROM) {
     free(rom)
 }
 
-// TODO: precalculate this when parsing
 rom_prg_ram_size :: proc(rom: ^ROM) -> u16 {
     switch flags in rom.header.format_specific_flags {
     case INES_Header_Data:
