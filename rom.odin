@@ -118,10 +118,22 @@ rom_free :: proc(rom: ^ROM) {
     free(rom)
 }
 
+// TODO: precalculate this when parsing
 rom_prg_ram_size :: proc(rom: ^ROM) -> u16 {
     switch flags in rom.header.format_specific_flags {
     case INES_Header_Data:
-        return u16(flags.flags_8) * PRG_RAM_BANK_SIZE
+        if flags.flags_10.prg_ram_present == 1 {
+            // This flag is an extension to the original iNES 1.0 format and is almost never used, but I'd like
+            // to support it anyway as the only option to explicitly disable PRG-RAM in iNES 1.0 ROMs. 
+            return 0
+        }
+
+        if flags.flags_8 > 0 {
+            return u16(flags.flags_8) * PRG_RAM_BANK_SIZE
+        }
+
+        // When both flags_8 and flags_10.prg_ram_present are 0, we assume a single 8 KB bank of PRG-RAM
+        return PRG_RAM_BANK_SIZE 
     }
 
     return 0
