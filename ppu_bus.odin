@@ -4,6 +4,7 @@ PPU_OPEN_BUS_VALUE :: 0xFF
 
 NES_PPU_Bus :: struct {
     vram: [2 * 1024]byte,
+    palette_ram: [32]byte,
 
     cpu_bus: ^NES_CPU_Bus,
     
@@ -28,7 +29,16 @@ ppu_bus_read :: proc(b: ^NES_PPU_Bus, address: u16) -> u8 {
         case:
             return PPU_OPEN_BUS_VALUE
         }
-    case 0x3F00 ..= 0x3FFF: // This address space is internal to the PPU
+    case 0x3F00 ..= 0x3FFF: // This address space is internal to the PPU - palette RAM
+        effective_address := (address - 0x3F00) & 0x1F // Mask to 32 bytes
+        if effective_address & 0x03 == 0 {
+            // 0-th entry of each palette, both sprite and background (addresses 0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C),
+            // must point to the same memory. Masking effective address with 0x0F to mirror address 0x10 to address 0x00,
+            // address 0x14 to 0x04, etc.
+            effective_address &= 0x0F
+        }
+
+        return b.palette_ram[effective_address]
     }
 
     return PPU_OPEN_BUS_VALUE
@@ -49,5 +59,11 @@ ppu_bus_write :: proc(b: ^NES_PPU_Bus, address: u16, value: u8) {
             b.vram[effective_address] = value
         }
     case 0x3F00 ..= 0x3FFF:
+        effective_address := (address - 0x3F00) & 0x1F
+        if effective_address & 0x03 == 0 {
+            effective_address &= 0x0F
+        }
+        
+        b.palette_ram[effective_address] = value
     }
 }
