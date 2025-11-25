@@ -48,6 +48,21 @@ PPU :: struct {
     x: u8,  // Fine X scroll (3 bits)
     w: u8,  // First or second write toggle (1 bit)
 
+    // Shift registers used for drawing.
+    // Every dot/cycle, the low 8 bits of these are used to construct data for 1 pixel: 
+    // 2-bit color and 2-bit palette number. After that, they are shifted right.
+    bg_shifter_pattern_low: u16,  // Holds low bit of 2-bit color code for 16 pixels (2 tiles)
+    bg_shifter_pattern_high: u16, // Holds high bit of 2-bit color code
+    bg_shifter_palette_low: u16,  // Holds low bit of 2-bit palette number for 16 pixels
+    bg_shifter_palette_high: u16, // Holds high bit of 2-bit palette number
+
+    // Internal latches used to pre-fetch data for the next tile.
+    // Every 8 cycles, these latches are used to fill the high 8 bits of shift registers with data for the next tile.
+    bg_next_tile_id: u8,           // Fetched from nametable
+    bg_next_tile_palette: u8,      // Only 2 bits used - all pixels in a tile share the same palette
+    bg_next_tile_pattern_low: u8,  // Low bits of 2-bit color codes
+    bg_next_tile_pattern_high: u8, // High bits of 2-bit color codes
+
     is_odd_frame: bool,
     scanline_cycle: int, // Current cycle/dot inside a scanline
     scanline: int,       // Current scanline
