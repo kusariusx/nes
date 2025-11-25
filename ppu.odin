@@ -114,3 +114,86 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
         }
     }
 }
+
+// Every 8 cycles, we increment the coarse X to go to the next tile within the scanline.
+ppu_increment_coarse_x :: proc(p: ^PPU) {
+    if (p.v & 0x001F) == 31 { // If coarse X == 31
+        p.v &= ~u16(0x001F) // Coarse X = 0
+        p.v ~= 0x0400  // Switch horizontal nametable (flip bit 10 with XOR)
+    } else { // Otherwise, just increment coarse X
+        p.v += 1
+    }
+}
+
+// At cycle 256 of each scanline, we increment Y to move to the next pixel row.
+// Direct translation of pseudocode from NES documentation.
+ppu_increment_y :: proc(p: ^PPU) {
+    if (p.v & 0x7000) != 0x7000 { // If fine Y < 7, just increment fine Y
+        p.v += 0x1000 
+    } else {
+        p.v &= ~u16(0x7000) // Fine Y = 0
+
+        coarse_y := (p.v & 0x03E0) >> 5
+        if coarse_y == 29 {
+            coarse_y = 0
+            p.v ~= 0x0800 // Switch vertical nametable (flip bit 11)
+        } else if coarse_y == 31 {
+            coarse_y = 0 
+            // Not switching nametable
+        } else {
+            coarse_y += 1
+        }
+        
+        // Put coarse Y back into v
+        p.v = (p.v & ~u16(0x03E0)) | (coarse_y << 5)
+    }
+}
+
+// At cycle 257 of each scanline, copy all bits related to horizontal position from t to v
+ppu_transfer_x :: proc(p: ^PPU) {
+    // v: ....A.. ...BCDEF <- t: ....A.. ...BCDEF
+    // Copy bit 10 (horizontal nametable) and bits 0-4 (coarse X)
+    p.v = (p.v & ~u16(0x041F)) | (p.t & 0x041F)
+}
+
+// During cycles 280-304 of pre-render scanline, copy all bits related to vertical position from t to v
+ppu_transfer_y :: proc(p: ^PPU) {
+    // v: GHIA.BC DEF..... <- t: GHIA.BC DEF.....
+    // Copy bits 14-12 (fine Y), bit 11 (vertical nametable), and bits 9-5 (coarse Y)
+    p.v = (p.v & ~u16(0x7BE0)) | (p.t & 0x7BE0)
+}
+
+// Fetch nametable byte (tile ID) using current v address
+ppu_fetch_nametable_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
+    address := 0x2000 | (p.v & 0x0FFF)
+    return ppu_bus_read(b, address)
+}
+
+// Fetch attribute byte (palette number) using current v address
+ppu_fetch_attribute_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
+    address := 0x23C0 | (p.v & 0x0C00) | ((p.v >> 4) & 0x38) | ((p.v >> 2) & 0x07)
+    attribute_byte := ppu_bus_read(b, address)
+    
+    // Each attribute byte controls 4 tiles (2x2 block)
+    // Need to extract the correct 2 bits based on tile position within the block
+    coarse_x := p.v & 0x001F
+    coarse_y := (p.v >> 5) & 0x001F
+    
+    // Which quadrant of the 4-tile block? (0-3)
+    shift := ((coarse_y & 0x02) << 1) | (coarse_x & 0x02)
+    
+    return (attribute_byte >> shift) & 0x03
+}
+
+// Fetch pattern byte (tile pixel data) for given plane
+ppu_fetch_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, tile_id: u8, plane: u8) -> u8 {
+    pattern_table_base := u16(p.PPUCTRL.B) * 0x1000
+    
+    // Each tile is 16 bytes (8 bytes for low plane, 8 bytes for high plane)
+    // Fine Y selects which row within the tile
+    fine_y := (p.v >> 12) & 0x07
+    
+    address := pattern_table_base + (u16(tile_id) << 4) + (u16(plane) << 3) + fine_y
+    
+    return ppu_bus_read(b, address)
+}
