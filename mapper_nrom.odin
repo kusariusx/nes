@@ -1,7 +1,5 @@
 package main
 
-import "core:log"
-
 NROM :: struct{
     prg_ram: [0x2000]byte,
     chr_ram: [0x2000]byte,
