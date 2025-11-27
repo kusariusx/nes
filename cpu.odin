@@ -119,12 +119,16 @@ cpu_instruction_done :: proc(cpu: ^CPU) {
 	cpu.instruction = nil
 }
 
-cpu_reset :: proc(cpu: ^CPU) {
+cpu_reset :: proc(cpu: ^CPU, bus: CPU_Bus) {
 	cpu.A, cpu.X, cpu.Y = 0, 0, 0
 	cpu.S = 0xFD
 	
 	cpu.P.C, cpu.P.Z, cpu.P.D, cpu.P.V, cpu.P.N = 0, 0, 0, 0, 0
 	cpu.P.I, cpu.P.unused = 1, 1
+
+	// Set PC to reset vector
+	cpu.PCL = cpu_bus_read(bus, 0xFFFC)
+	cpu.PCH = cpu_bus_read(bus, 0xFFFD)
 }
 
 stack_push :: proc(cpu: ^CPU, bus: CPU_Bus, value: byte) {

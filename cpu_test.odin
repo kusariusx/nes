@@ -127,15 +127,15 @@ test_instructions_nestest :: proc(t: ^testing.T) {
     testing.expect_value(t, err, nil)
     defer rom_free(rom)
 
-    cpu := CPU{}
-    cpu_reset(&cpu)
-    cpu.PC = 0xC000
-
     m := NROM{}
     bus := NES_CPU_Bus{
         rom = rom,
         mapper = &m,
     }
+
+    cpu := CPU{}
+    cpu_reset(&cpu, &bus)
+    cpu.PC = 0xC000 // Custom PC for this test ROM
 
     buffer: [1]byte
 
@@ -172,8 +172,6 @@ test_instructions_blargg :: proc(t: ^testing.T) {
         testing.expect_value(t, err, nil)
         defer rom_free(rom)
 
-        cpu := CPU{}
-        cpu_reset(&cpu)
 
         mapper := NROM{}
         cpu_bus := NES_CPU_Bus{
@@ -181,8 +179,8 @@ test_instructions_blargg :: proc(t: ^testing.T) {
             mapper = &mapper,
         }
 
-        cpu.PCL = cpu_bus_read(&cpu_bus, 0xFFFC)
-        cpu.PCH = cpu_bus_read(&cpu_bus, 0xFFFD)
+        cpu := CPU{}
+        cpu_reset(&cpu, &cpu_bus)
 
         ppu := PPU{}
         ppu_bus := NES_PPU_Bus{

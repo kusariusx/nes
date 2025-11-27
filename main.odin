@@ -8,6 +8,8 @@ import "core:time"
 TARGET_FPS :: 60.0
 FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
 
+ROM_PATH :: "test/cpu/cpu-interrupts/5-branch_delays_irq.nes"
+
 main :: proc() {
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -17,7 +19,7 @@ main :: proc() {
 		defer tracking_allocator_report(track)
 	}
 
-	rom_data, err_read := os.read_entire_file_from_filename_or_err("test/cpu/blargg-singles/03-immediate.nes")
+	rom_data, err_read := os.read_entire_file_from_filename_or_err(ROM_PATH)
 	if err_read != nil {
 		fmt.eprintfln("unable to read ROM: %v", err_read)
 		return
@@ -32,10 +34,8 @@ main :: proc() {
 	defer rom_free(rom)
 
 	mapper := NROM{}
-
-	cpu := CPU{}
 	ppu := PPU{}
-
+	
 	ppu_bus := NES_PPU_Bus{
 		mapper = &mapper,
 		rom = rom,
@@ -50,9 +50,8 @@ main :: proc() {
 
 	ppu_bus.cpu_bus = &cpu_bus
 
-	cpu_reset(&cpu)
-	cpu.PCL = cpu_bus_read(&cpu_bus, 0xFFFC)
-	cpu.PCH = cpu_bus_read(&cpu_bus, 0xFFFD)
+	cpu := CPU{}
+	cpu_reset(&cpu, &cpu_bus)
 
 	ui := ui_init()
 	defer ui_free(&ui)
