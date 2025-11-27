@@ -49,7 +49,7 @@ PPU :: struct {
     w: u8,  // First or second write toggle (1 bit)
 
     // Shift registers used for drawing.
-    // Every dot/cycle, the low 8 bits of these are used to construct data for 1 pixel: 
+    // Every dot/cycle, the high 8 bits of these are used to construct data for 1 pixel: 
     // 2-bit color and 2-bit palette number. After that, they are shifted right.
     bg_shifter_pattern_low: u16,  // Holds low bit of 2-bit color code for 16 pixels (2 tiles)
     bg_shifter_pattern_high: u16, // Holds high bit of 2-bit color code
@@ -57,7 +57,7 @@ PPU :: struct {
     bg_shifter_palette_high: u16, // Holds high bit of 2-bit palette number
 
     // Internal latches used to pre-fetch data for the next tile.
-    // Every 8 cycles, these latches are used to fill the high 8 bits of shift registers with data for the next tile.
+    // Every 8 cycles, these latches are used to fill the low 8 bits of shift registers with data for the next tile.
     bg_next_tile_id: u8,           // Fetched from nametable
     bg_next_tile_palette: u8,      // Only 2 bits used - all pixels in a tile share the same palette
     bg_next_tile_pattern_low: u8,  // Low bits of 2-bit color codes
@@ -66,12 +66,84 @@ PPU :: struct {
     is_odd_frame: bool,
     scanline_cycle: int, // Current cycle/dot inside a scanline
     scanline: int,       // Current scanline
+
+    framebuffer: [256 * 240]u8,
 }
 
 // PPU runs 3x faster than CPU, so for each CPU tick, we tick PPU 3 times
 ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
+    rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
+   
     switch p.scanline {
-    case 0 ..= 239: // Visible scanlines
+    case 0 ..= 239, 261: // Visible scanlines and pre-render scanline
+        // Joining visible and pre-render scanlines because a lot of identical things happen on both of them
+
+        is_pre_render_scanline := p.scanline == 261
+        is_visible_scanline := !is_pre_render_scanline
+
+        if is_pre_render_scanline {
+            // The three PPUSTATUS flags are automatically cleared on dot 1 of the pre-render scanline
+            if p.scanline_cycle == 1 {
+                p.PPUSTATUS.V = 0
+                p.PPUSTATUS.S = 0
+                p.PPUSTATUS.O = 0
+            }
+        }
+
+        if rendering_enabled {
+            is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
+            is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
+
+            if is_visible_scanline && is_rendering_cycle {
+                color, palette := ppu_get_background_pixel(p) 
+
+                // Calculate palette RAM address
+                // If color is 0, it's transparent - use backdrop color
+                palette_address: u16
+                if color == 0 {
+                    palette_address = 0x3F00 // Backdrop color
+                } else {
+                    palette_address = 0x3F00 + (palette << 2) + color
+                }
+                
+                color_index := ppu_bus_read(b, palette_address)
+                
+                // Write to framebuffer
+                pixel_index := p.scanline * 256 + (p.scanline_cycle - 1)
+                p.framebuffer[pixel_index] = color_index
+            }
+
+            // These are happening on both visible scanlines and pre-render scanline
+            if is_rendering_cycle || is_prefetch_cycle {
+                switch p.scanline_cycle % 8 {
+                case 1:
+                    ppu_load_shifters(p)
+                    p.bg_next_tile_id = ppu_fetch_nametable_byte(p, b)
+                case 3:
+                    p.bg_next_tile_palette = ppu_fetch_attribute_byte(p, b)
+                case 5:
+                    p.bg_next_tile_pattern_low = ppu_fetch_pattern_byte(p, b, p.bg_next_tile_id, LOW)
+                case 7:
+                    p.bg_next_tile_pattern_high = ppu_fetch_pattern_byte(p, b, p.bg_next_tile_id, HIGH)
+                case 0:
+                    ppu_increment_coarse_x(p)
+                }
+
+                ppu_shift_registers(p)
+            }
+            
+            if p.scanline_cycle == 256 {
+                ppu_increment_y(p)
+            }
+            
+            if p.scanline_cycle == 257 {
+                ppu_transfer_x(p)
+            }
+            
+            if is_pre_render_scanline && p.scanline_cycle >= 280 && p.scanline_cycle <= 304 {
+                ppu_transfer_y(p)
+            }
+        }
     case 240: // Post-render scanline
         // PPU is idle during this scanline
     case 241 ..= 260: // VBlank scanlines
@@ -84,20 +156,11 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 b.cpu_bus.nmi_pending = true
             }
         }
-    case 261: // Pre-render scanline
-        // The three PPUSTATUS flags are automatically cleared on dot 1 of the prerender scanline
-        if p.scanline_cycle == 1 {
-            p.PPUSTATUS.V = 0
-            p.PPUSTATUS.S = 0
-            p.PPUSTATUS.O = 0
-        }
     }
 
     p.scanline_cycle += 1
 
-    rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
-
-    // 261st scanline varies in length, could be 341 or 340 cycles long
+    // 261-st scanline varies in length, could be 341 or 340 cycles long
     // All other scanlines are 341 cycles long
     scanline_length := 341
     if p.scanline == 261 && p.is_odd_frame && rendering_enabled {
@@ -196,4 +259,41 @@ ppu_fetch_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, tile_id: u8, plane: u8)
     address := pattern_table_base + (u16(tile_id) << 4) + (u16(plane) << 3) + fine_y
     
     return ppu_bus_read(b, address)
+}
+
+ppu_load_shifters :: proc(p: ^PPU) {
+    // Load pattern data into low 8 bits of shifters
+    p.bg_shifter_pattern_low = (p.bg_shifter_pattern_low & 0xFF00) | u16(p.bg_next_tile_pattern_low)
+    p.bg_shifter_pattern_high = (p.bg_shifter_pattern_high & 0xFF00) | u16(p.bg_next_tile_pattern_high)
+    
+    // Expand palette bits: if bit is 1, fill with 0xFF; if 0, fill with 0x00
+    palette_low := p.bg_next_tile_palette & 0x01 != 0 ? u16(0xFF) : 0x00
+    palette_high := p.bg_next_tile_palette & 0x02 != 0 ?  u16(0xFF) : 0x00
+    
+    p.bg_shifter_palette_low = (p.bg_shifter_palette_low & 0xFF00) | palette_low
+    p.bg_shifter_palette_high = (p.bg_shifter_palette_high & 0xFF00) | palette_high
+}
+
+ppu_shift_registers :: proc(p: ^PPU) {
+    p.bg_shifter_pattern_low  <<= 1
+    p.bg_shifter_pattern_high <<= 1
+    p.bg_shifter_palette_low  <<= 1
+    p.bg_shifter_palette_high <<= 1
+}
+
+ppu_get_background_pixel :: proc(p: ^PPU) -> (color: u16, palette: u16) {
+    // Select bit based on fine X scroll
+    bit_select := 15 - p.x
+    
+    // Extract one bit from each shifter
+    pixel_bit_0 := (p.bg_shifter_pattern_low >> bit_select) & 1
+    pixel_bit_1 := (p.bg_shifter_pattern_high >> bit_select) & 1
+    palette_bit_0 := (p.bg_shifter_palette_low >> bit_select) & 1
+    palette_bit_1 := (p.bg_shifter_palette_high >> bit_select) & 1
+    
+    // Combine bits
+    color = (pixel_bit_1 << 1) | pixel_bit_0
+    palette = (palette_bit_1 << 1) | palette_bit_0
+    
+    return
 }
