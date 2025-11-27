@@ -5,6 +5,9 @@ import "core:mem"
 import "core:os"
 import "core:time"
 
+TARGET_FPS :: 60.0
+FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
+
 main :: proc() {
 	when ODIN_DEBUG {
 		track: mem.Tracking_Allocator
@@ -14,7 +17,70 @@ main :: proc() {
 		defer tracking_allocator_report(track)
 	}
 
-	
+	rom_data, err_read := os.read_entire_file_from_filename_or_err("test/cpu/blargg-singles/03-immediate.nes")
+	if err_read != nil {
+		fmt.eprintfln("unable to read ROM: %v", err_read)
+		return
+	}
+	defer delete(rom_data)
+
+	rom, err_parsing := rom_parse(rom_data)
+	if err_parsing != nil {
+		fmt.eprintfln("unable to parse ROM: %v", err_read)
+		return
+	}
+	defer rom_free(rom)
+
+	mapper := NROM{}
+
+	cpu := CPU{}
+	ppu := PPU{}
+
+	ppu_bus := NES_PPU_Bus{
+		mapper = &mapper,
+		rom = rom,
+	}
+
+	cpu_bus := NES_CPU_Bus{
+		mapper = &mapper,
+		ppu = &ppu,
+		ppu_bus = &ppu_bus,
+		rom = rom,
+	}
+
+	ppu_bus.cpu_bus = &cpu_bus
+
+	cpu_reset(&cpu)
+	cpu.PCL = cpu_bus_read(&cpu_bus, 0xFFFC)
+	cpu.PCH = cpu_bus_read(&cpu_bus, 0xFFFD)
+
+	ui := ui_init()
+	defer ui_free(&ui)
+
+	for ui_poll_event() {
+		frame_start := time.tick_now()
+		is_odd_frame := ppu.is_odd_frame
+
+		// Emulate 1 frame
+		for ppu.is_odd_frame == is_odd_frame {
+			cpu_tick(&cpu, &cpu_bus)
+
+			// 3 PPU cycles for every CPU cycle
+			ppu_tick(&ppu, &ppu_bus)
+			ppu_tick(&ppu, &ppu_bus)
+			ppu_tick(&ppu, &ppu_bus)
+		}
+		
+		ui_update_texture(&ui, ppu.framebuffer[:])
+		ui_render(&ui)
+		
+		// Limit to 60 FPS
+		elapsed := time.duration_microseconds(time.tick_since(frame_start))
+		if elapsed < FRAME_TIME_MICROSECONDS {
+			to_sleep := time.Duration(FRAME_TIME_MICROSECONDS - elapsed) * time.Microsecond
+			time.sleep(to_sleep)
+		}
+	}
 }
 
 tracking_allocator_report :: proc(track: mem.Tracking_Allocator) {
