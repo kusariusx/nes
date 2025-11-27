@@ -72,7 +72,9 @@ PPU :: struct {
 
 // PPU runs 3x faster than CPU, so for each CPU tick, we tick PPU 3 times
 ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
-    rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
+    is_background_enabled := p.PPUMASK.b == 1
+    is_sprite_enabled := p.PPUMASK.s == 1
+    is_rendering_enabled := is_background_enabled || is_sprite_enabled
    
     switch p.scanline {
     case 0 ..= 239, 261: // Visible scanlines and pre-render scanline
@@ -90,12 +92,19 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             }
         }
 
-        if rendering_enabled {
+        if is_rendering_enabled {
             is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
             is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
 
             if is_visible_scanline && is_rendering_cycle {
-                color, palette := ppu_get_background_pixel(p) 
+                color, palette: u16
+                pixel_x := p.scanline_cycle - 1
+
+                if !is_background_enabled || (pixel_x < 8 && p.PPUMASK.m == 0) {
+                    color, palette = 0, 0
+                } else {
+                    color, palette = ppu_get_background_pixel(p) 
+                }
 
                 // Calculate palette RAM address
                 // If color is 0, it's transparent - use backdrop color
@@ -109,7 +118,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 color_index := ppu_bus_read(b, palette_address)
                 
                 // Write to framebuffer
-                pixel_index := p.scanline * 256 + (p.scanline_cycle - 1)
+                pixel_index := p.scanline * 256 + pixel_x
                 p.framebuffer[pixel_index] = color_index
             }
 
@@ -163,7 +172,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     // 261-st scanline varies in length, could be 341 or 340 cycles long
     // All other scanlines are 341 cycles long
     scanline_length := 341
-    if p.scanline == 261 && p.is_odd_frame && rendering_enabled {
+    if p.scanline == 261 && p.is_odd_frame && is_rendering_enabled {
         scanline_length = 340
     }
 
