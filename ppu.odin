@@ -40,7 +40,8 @@ PPU :: struct {
 
     ppudata_read_buffer: u8,
 
-    OAM: [256]u8, // Object Attribute Memory
+    oam: [256]u8, // Object Attribute Memory
+    secondary_oam: [32]u8,
 
     // Internal PPU registers
     v: u16, // Current VRAM address (15 bits)
@@ -66,6 +67,14 @@ PPU :: struct {
     is_odd_frame: bool,
     scanline_cycle: int, // Current cycle/dot inside a scanline
     scanline: int,       // Current scanline
+    
+    sprite_eval_n: u8, // What sprite we currently evaluate
+    sprite_eval_m: u8, // Current byte within sprite
+    sprite_eval_oam_data: u8,
+    sprite_eval_found: u8, // How many sprites we have found for a scanline
+    sprite_eval_secondary_oam_pos: u8,
+    sprite_eval_done: bool,
+    sprite_eval_pending_reads: u8, // To mark that we need to read 3 more OAM bytes during overflow phase
 
     framebuffer: [256 * 240]u8,
 }
@@ -96,6 +105,138 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
             is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
 
+            // Sprite evaluation
+            // Only happens on visible scanlines when rendering is enabled
+            if is_visible_scanline {
+                increment_n :: proc(p: ^PPU) {
+                    p.sprite_eval_n = (p.sprite_eval_n + 1) & 0x3F // Wrap to 0-63
+                    if p.sprite_eval_n == 0 { // Overflow to 0 - all 64 sprites have been evaluated
+                        p.sprite_eval_done = true
+                    }  
+                }
+
+                increment_m :: proc(p: ^PPU) {
+                    if p.sprite_eval_m == 3 { // Processed last byte of the sprite
+                        // Move on to the next sprite
+                        p.sprite_eval_m = 0
+                        increment_n(p)
+                    } else {
+                        // Move on to the next byte within the sprite
+                        p.sprite_eval_m += 1 
+                    }
+                }
+
+                is_odd_cycle := p.scanline_cycle % 2 == 1
+
+                if p.scanline_cycle == 1 { // Sprite evaluation has just started
+                    // Reset state
+                    p.sprite_eval_n = 0
+                    p.sprite_eval_m = 0
+                    p.sprite_eval_found = 0
+                    p.sprite_eval_secondary_oam_pos = 0
+                    p.sprite_eval_pending_reads = 0
+                    p.sprite_eval_done = false
+                }
+
+                switch p.scanline_cycle {
+                case 1 ..= 64: // Secondary OAM clearing
+                    if is_odd_cycle {
+                        // Dummy read from OAM
+                        // Note: since OAM is not accessed through the bus (i.e. read has no side effects), 
+                        // we can probably just do nothing here?
+                    } else {
+                        // Write 0xFF to secondary OAM
+                        // Writes happen at cycles 2, 4, ..., 64 into positions 0, 1, ..., 31
+                        secondary_oam_pos := (p.scanline_cycle >> 1) - 1
+                        p.secondary_oam[secondary_oam_pos] = 0xFF
+                    }
+                case 65 ..= 256: // Sprite evaluation
+                    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
+
+                    if p.sprite_eval_done {
+                        if is_odd_cycle {
+                            // Dummy read n-th sprite from OAM
+                            // Reading OAM has no side effects, so can just do nothing here
+                        } else {
+                            increment_n(p)
+                        }
+
+                        // Just burn cycles until we reach cycle 257
+
+                        break
+                    }
+
+                    // Already found 8 sprites to draw, but still have sprites to evaluate - transition
+                    // to sprite overflow phase.
+                    if p.sprite_eval_found == 8 {
+                        if is_odd_cycle {
+                            oam_pos := (p.sprite_eval_n << 2) + p.sprite_eval_m
+                            p.sprite_eval_oam_data = p.oam[oam_pos]
+                        } else {
+                            if p.sprite_eval_pending_reads > 0 {
+                                // Dummy read the OAM
+
+                                increment_m(p)
+                                p.sprite_eval_pending_reads -= 1
+                            } else {
+                                // Evaluate data as a Y position. Due to hardware bug leading to m being incremented together with n,
+                                // data will not always be the 0-th byte of a sprite, but we still evaluate it as such.
+                                sprite_y := int(p.sprite_eval_oam_data) + 1
+                                sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
+
+                                if sprite_in_range {
+                                    // Set overflow flag because we have found more than 8 in-range sprites
+                                    p.PPUSTATUS.O = 1
+
+                                    increment_m(p)
+
+                                    // Request to read 3 next OAM bytes without evaluating them, effectively skipping to the next sprite
+                                    p.sprite_eval_pending_reads = 3
+                                } else {
+                                    // Hardware bug - increment both n and m. This leads to random data (tile index, attributes, X position)
+                                    // being evaluated as Y position, leading to random changes in overflow flag.
+                                    p.sprite_eval_m = (p.sprite_eval_m + 1) & 0x03 // Increment and wrap to 0-3
+                                    increment_n(p)
+                                }
+                            }
+                        }
+
+                        break
+                    }
+
+                    // On odd cycles, data is read from OAM
+                    // On even cycles, state is updated and writes to secondary OAM happen
+                    if is_odd_cycle {
+                        oam_pos := (p.sprite_eval_n << 2) + p.sprite_eval_m // 4 * n + m
+                        p.sprite_eval_oam_data = p.oam[oam_pos]
+                    } else {
+                        switch p.sprite_eval_m {
+                        case 0: // Started processing a new sprite (0-th byte, Y position)
+                            // We write Y to secondary OAM regardless of whether the sprite is in range or not.
+                            // If not in range, it will be just overwritten by the next sprite.
+                            p.secondary_oam[p.sprite_eval_secondary_oam_pos] = p.sprite_eval_oam_data
+
+                            sprite_y := int(p.sprite_eval_oam_data) + 1 // OAM holds sprite's Y position - 1
+                            sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
+                            
+                            if sprite_in_range {
+                                p.sprite_eval_found += 1
+                                p.sprite_eval_secondary_oam_pos += 1 // Advance in the secondary OAM
+                                p.sprite_eval_m += 1 // We would like to process the next byte of this sprite
+                            } else {
+                                increment_n(p) // Move on to the next sprite, leave m at 0, and secondary OAM position intact
+                            }
+                        case 1, 2, 3: // Processing tile index, attributes, or X position
+                            // Copy byte to secondary OAM
+                            p.secondary_oam[p.sprite_eval_secondary_oam_pos] = p.sprite_eval_oam_data
+                            p.sprite_eval_secondary_oam_pos += 1
+
+                            increment_m(p)
+                        }
+                    }
+                }   
+            }
+
             if is_visible_scanline && is_rendering_cycle {
                 color, palette: u16
                 pixel_x := p.scanline_cycle - 1
@@ -122,7 +263,8 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 p.framebuffer[pixel_index] = color_index
             }
 
-            // These are happening on both visible scanlines and pre-render scanline
+            // Background fetching
+            // Happens on both visible scanlines and pre-render scanline
             if is_rendering_cycle || is_prefetch_cycle {
                 switch p.scanline_cycle % 8 {
                 case 1:

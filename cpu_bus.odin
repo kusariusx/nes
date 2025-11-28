@@ -63,7 +63,7 @@ nes_cpu_bus_resolve_read :: proc(b: ^NES_CPU_Bus, address: u16) -> u8 {
             return value
         case 4: // OAMDATA
             // TODO: if OAMDATA is read during rendering, different values are returned (based on sprite evaluation state)
-            return b.ppu.OAM[b.ppu.OAMADDR]
+            return b.ppu.oam[b.ppu.OAMADDR]
         case 7: // PPUDATA
             // Read current data
             value := ppu_bus_read(b.ppu_bus, b.ppu.v)
@@ -121,7 +121,7 @@ nes_cpu_bus_resolve_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
         case 3: // OAMADDR
             b.ppu.OAMADDR = value
         case 4: // OAMDATA
-            b.ppu.OAM[b.ppu.OAMADDR] = value
+            b.ppu.oam[b.ppu.OAMADDR] = value
             b.ppu.OAMADDR += 1 // Will wrap automatically since OAMADDR is u8
         case 5: // PPUSCROLL
             // Note: I could've stored these values in separate variables - it would've been simpler.
