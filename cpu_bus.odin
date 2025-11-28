@@ -15,6 +15,11 @@ NES_CPU_Bus :: struct {
     // CPU will check these, and other components will write into them
     nmi_pending: bool,
     irq_pending: bool,
+
+    oam_dma_pending: bool,
+    oam_dma_active: bool,
+    oam_dma_address: u16,
+    oam_dma_data: u8,
 }
 
 nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16) -> u8 {
@@ -154,6 +159,11 @@ nes_cpu_bus_resolve_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
             // causing simultaneous coarse X increment and Y increment.
         }
     case 0x4000 ..= 0x4017: // APU and IO registers
+        switch address {
+        case 0x4014: // OAMDMA
+            b.oam_dma_pending = true
+            b.oam_dma_address = u16(value) << 8
+        }
     case 0x4018 ..= 0x401F: // Additional APU and IO functionality which is normally disabled
     case 0x4020 ..= 0xFFFF: // Unmapped - cartridges are free to map this area to anything 
     }

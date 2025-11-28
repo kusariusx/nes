@@ -7,6 +7,8 @@ HIGH :: 1
 
 STACK_START :: 0x100
 
+OAMDATA_ADDRESS :: 0x2004
+
 // Flags layout in the register:
 // Bit:   76543210
 // Value: NV1BDIZC
@@ -36,6 +38,9 @@ CPU :: struct {
 
 	halt: bool,
 
+	// To control DMA cadence - DMAs can only start on read cycles. If they start on write cycles, they wait.
+	read_cycle: bool,
+
 	// Registers
 	A:                   byte, // Accumulator
 	X, Y:                byte, // Indexing registers
@@ -56,6 +61,39 @@ Instruction :: struct {
 }
 
 cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
+	// Alternate between read and write cycles
+	cpu.read_cycle = !cpu.read_cycle
+
+	// Handle OAM DMA
+	if bus.oam_dma_pending {
+		// We should wait for either 2 or 1 cycles depending on whether this is a read or a write cycle
+		if cpu.read_cycle {
+			// Do nothing, let oam_dma_pending remain true and skip this cycle
+		} else {
+			// We only need to halt for 1 (current) cycle
+			bus.oam_dma_pending = false
+			bus.oam_dma_active = true // DMA will start on the next (read) cycle
+		}
+
+		return
+	}
+
+	if bus.oam_dma_active {
+		if cpu.read_cycle { // Read from page
+			bus.oam_dma_data = cpu_bus_read(bus, bus.oam_dma_address)
+		} else { // Write to OAMDATA
+			cpu_bus_write(bus, OAMDATA_ADDRESS, bus.oam_dma_data)
+
+			if bus.oam_dma_address & 0x00FF == 0xFF { // We've just wrote the last byte (reached page end)
+				bus.oam_dma_active = false
+			} else { // We still have data remaining
+				bus.oam_dma_address += 1
+			}
+		}
+
+		return
+	}
+
 	if cpu.halt {
 		// Ignore the tick if CPU is halted
 		return
@@ -129,6 +167,8 @@ cpu_reset :: proc(cpu: ^CPU, bus: CPU_Bus) {
 	// Set PC to reset vector
 	cpu.PCL = cpu_bus_read(bus, 0xFFFC)
 	cpu.PCH = cpu_bus_read(bus, 0xFFFD)
+
+	cpu.read_cycle = false
 }
 
 stack_push :: proc(cpu: ^CPU, bus: CPU_Bus, value: byte) {
