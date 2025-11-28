@@ -66,6 +66,9 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 
 	// Handle OAM DMA
 	if bus.oam_dma_pending {
+		// Dummy read during alignment cycle
+		cpu_bus_read(bus, cpu.PC)
+
 		// We should wait for either 2 or 1 cycles depending on whether this is a read or a write cycle
 		if cpu.read_cycle {
 			// Do nothing, let oam_dma_pending remain true and skip this cycle
