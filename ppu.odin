@@ -75,12 +75,13 @@ PPU :: struct {
     sprite_eval_secondary_oam_pos: u8,
     sprite_eval_done: bool,
     sprite_eval_pending_reads: u8, // To mark that we need to read 3 more OAM bytes during overflow phase
+    sprite_eval_sprite_0_present: bool, // Is sprite 0 present on a scanline
 
     // Shifters for sprite drawing
     sprite_shifter_pattern_low: [8]u8, 
     sprite_shifter_pattern_high: [8]u8, 
     sprite_attributes: [8]u8,
-    sprite_x_position: [8]u8, // These will be decrementing each rendering cycle; when 0 - sprite becomes visible
+    sprite_x_position: [8]u8, // These will be decrementing each rendering cycle; when 0 - sprite becomes active/visible
 
     // Latches to temporary store fetched sprite data
     sprite_y_position: u8,
@@ -138,14 +139,14 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
                 is_odd_cycle := p.scanline_cycle % 2 == 1
 
-                if p.scanline_cycle == 1 { // Sprite evaluation has just started
-                    // Reset state
+                if p.scanline_cycle == 1 { // Sprite evaluation has just started, reset state
                     p.sprite_eval_n = 0
                     p.sprite_eval_m = 0
                     p.sprite_eval_found = 0
                     p.sprite_eval_secondary_oam_pos = 0
                     p.sprite_eval_pending_reads = 0
                     p.sprite_eval_done = false
+                    p.sprite_eval_sprite_0_present = false
                 }
 
                 switch p.scanline_cycle {
@@ -233,6 +234,10 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                                 p.sprite_eval_found += 1
                                 p.sprite_eval_secondary_oam_pos += 1 // Advance in the secondary OAM
                                 p.sprite_eval_m += 1 // We would like to process the next byte of this sprite
+
+                                if p.sprite_eval_n == 0 {
+                                    p.sprite_eval_sprite_0_present = true
+                                }
                             } else {
                                 increment_n(p) // Move on to the next sprite, leave m at 0, and secondary OAM position intact
                             }
@@ -288,7 +293,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 background_color, background_palette: u16
                 sprite_color, sprite_palette, sprite_priority: u8
 
-                // Handle disable and "show leftmost 8 pixels" flags
+                // Handle disable flag and "show leftmost 8 pixels" flag, extract pixels
                 if !is_background_enabled || (pixel_x < 8 && p.PPUMASK.m == 0) {
                     background_color, background_palette = 0, 0
                 } else {
@@ -301,9 +306,31 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                     sprite_color, sprite_palette, sprite_priority = ppu_get_sprite_pixel(p)
                 }
 
-                // After pixel extraction, shift active/visible sprites
+                // Sprite 0 hit detection
+                if p.sprite_eval_sprite_0_present {
+                    // If sprite 0 is present on the current scanline, it is guaranteed to be first in our shifters/latches
+                    sprite_0_bit_0 := p.sprite_shifter_pattern_low[0] >> 7
+                    sprite_0_bit_1 := p.sprite_shifter_pattern_high[0] >> 7
+                    sprite_0_color := (sprite_0_bit_1 << 1) | sprite_0_bit_0
+
+                    sprite_0_hit := // Sprite 0 is hit when...
+                        p.sprite_x_position[0] == 0 && // Sprite 0 is active
+                        p.PPUSTATUS.S == 0 && // It was not hit earlier on the scanline
+                        background_color != 0 && sprite_0_color != 0 && // Both background and sprite 0 are opaque
+                        // Sprite 0 hit is not detected when rendering is disabled for leftmost 8 pixels.
+                        // We are either in the safe zone where this restriction does not apply (pixel_x >= 8),
+                        // Or both background and sprites are enabled in this zone.
+                        (pixel_x >= 8 || (p.PPUMASK.m == 1 && p.PPUMASK.M == 1)) &&
+                        pixel_x != 255 // Due to hardware specifics, sprite 0 hit cannot occur at X = 255
+
+                    if sprite_0_hit {
+                        p.PPUSTATUS.S = 1
+                    }
+                }
+
+                // After pixel extraction and sprite 0 hit detection, shift active sprites
                 for i in 0 ..< 8 {
-                    if p.sprite_x_position[i] == 0 { 
+                    if p.sprite_x_position[i] == 0 {
                         p.sprite_shifter_pattern_low[i] <<= 1
                         p.sprite_shifter_pattern_high[i] <<= 1
                     }
