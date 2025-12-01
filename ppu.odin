@@ -57,7 +57,7 @@ PPU :: struct {
     bg_shifter_palette_low: u16,  // Holds low bit of 2-bit palette number for 16 pixels
     bg_shifter_palette_high: u16, // Holds high bit of 2-bit palette number
 
-    // Internal latches used to pre-fetch data for the next tile.
+    // Internal latches used to pre-fetch background data for the next tile.
     // Every 8 cycles, these latches are used to fill the low 8 bits of shift registers with data for the next tile.
     bg_next_tile_id: u8,           // Fetched from nametable
     bg_next_tile_palette: u8,      // Only 2 bits used - all pixels in a tile share the same palette
@@ -75,6 +75,16 @@ PPU :: struct {
     sprite_eval_secondary_oam_pos: u8,
     sprite_eval_done: bool,
     sprite_eval_pending_reads: u8, // To mark that we need to read 3 more OAM bytes during overflow phase
+
+    // Shifters for sprite drawing
+    sprite_shifter_pattern_low: [8]u8, 
+    sprite_shifter_pattern_high: [8]u8, 
+    sprite_attributes: [8]u8,
+    sprite_x_position: [8]u8,
+
+    // Latches to temporary store fetched sprite data
+    sprite_y_position: u8,
+    sprite_tile_number: u8,
 
     framebuffer: [256 * 240]u8,
 }
@@ -181,7 +191,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                             } else {
                                 // Evaluate data as a Y position. Due to hardware bug leading to m being incremented together with n,
                                 // data will not always be the 0-th byte of a sprite, but we still evaluate it as such.
-                                sprite_y := int(p.sprite_eval_oam_data) + 1
+                                sprite_y := int(p.sprite_eval_oam_data)
                                 sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
 
                                 if sprite_in_range {
@@ -216,7 +226,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                             // If not in range, it will be just overwritten by the next sprite.
                             p.secondary_oam[p.sprite_eval_secondary_oam_pos] = p.sprite_eval_oam_data
 
-                            sprite_y := int(p.sprite_eval_oam_data) + 1 // OAM holds sprite's Y position - 1
+                            sprite_y := int(p.sprite_eval_oam_data)
                             sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
                             
                             if sprite_in_range {
@@ -234,7 +244,32 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                             increment_m(p)
                         }
                     }
-                }   
+                }
+            }
+
+            switch p.scanline_cycle {
+            case 257 ..= 320: // Sprite fetching, happens on both visible scanlines and pre-render scanline
+                sprite_idx := (p.scanline_cycle - 257) / 8
+                secondary_oam_pos := sprite_idx * 4
+
+                // When we have less than 8 sprites on a scanline, we still perform all this fetches but discard
+                // those dummy sprites during rendering.
+                switch p.scanline_cycle % 8 {
+                case 1: // Read Y
+                    p.sprite_y_position = p.secondary_oam[secondary_oam_pos]
+                    ppu_fetch_nametable_byte(p, b) // Dummy nametable fetch (at cycles 1-2)
+                case 2: // Read tile number
+                    p.sprite_tile_number = p.secondary_oam[secondary_oam_pos + 1]
+                case 3: // Read attributes
+                    p.sprite_attributes[sprite_idx] = p.secondary_oam[secondary_oam_pos + 2]
+                    ppu_fetch_nametable_byte(p, b) // Dummy nametable fetch (at cycles 3-4)
+                case 4: // Read X
+                    p.sprite_x_position[sprite_idx] = p.secondary_oam[secondary_oam_pos + 3]
+                case 5: // Fetch pattern low (takes 2 cycles)
+                    p.sprite_shifter_pattern_low[sprite_idx] = ppu_fetch_sprite_pattern_byte(p, b, sprite_idx, LOW)
+                case 7: // Fetch pattern high (takes 2 cycles)
+                    p.sprite_shifter_pattern_high[sprite_idx] = ppu_fetch_sprite_pattern_byte(p, b, sprite_idx, HIGH)
+                }
             }
 
             if is_visible_scanline && is_rendering_cycle {
@@ -327,6 +362,64 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             p.is_odd_frame = !p.is_odd_frame
         }
     }
+}
+
+reverse_bits :: proc(n: u8) -> u8 {
+    n := n
+    result := u8(0)
+
+    for _ in 0 ..< 8 {
+        result = (result << 1) | (n & 1)
+        n >>= 1
+    }
+
+    return result
+}
+
+ppu_fetch_sprite_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, sprite_idx: int, plane: u16) -> u8 {
+    attributes := p.sprite_attributes[sprite_idx]
+
+    // Mask with (sprite_height - 1) to keep the value within 0-7/0-15 range.
+    // This will be important for dummy sprite fetches where the Y coordinate is 0xFF.
+    // In such cases, row might be negative, which will lead to wrap-around when casting to u16 during address calculation.
+    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
+    row := (p.scanline - int(p.sprite_y_position)) & (sprite_height - 1)
+    
+    address: u16
+
+    if sprite_height == 8 {
+        if attributes & 0x80 != 0 { // Vertical flip
+            row = 7 - row
+        }
+
+        address = u16(p.PPUCTRL.S) * 0x1000 + (u16(p.sprite_tile_number) << 4) + u16(row)
+    } else {
+        // We ignore PPUCTRL.S for 16-pixel sprites, and use 0-th bit of tile number as a pattern table number
+        address = u16(p.sprite_tile_number & 1) * 0x1000
+        tile := p.sprite_tile_number
+
+        if attributes & 0x80 != 0 { // Vertical flip
+            row = 15 - row
+        }
+
+        if row < 8 {
+            tile &= 0xFE // Switch to top tile
+        } else {
+            tile |= 1 // Switch to bottom tile
+            row -= 8 // Normalize row to a single 8x8 tile
+        }
+
+        address += (u16(tile) << 4) + u16(row)
+    }
+
+    address += plane * 8
+    pattern := ppu_bus_read(b, address)
+
+    if attributes & 0x40 != 0 { // Horizontal flip
+        pattern = reverse_bits(pattern)
+    }
+    
+    return pattern
 }
 
 // Every 8 cycles, we increment the coarse X to go to the next tile within the scanline.
