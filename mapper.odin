@@ -40,3 +40,21 @@ mapper_ppu_write :: proc(mapper: Mapper, rom: ^ROM, address: u16, value: u8) -> 
 
     return false
 }
+
+mapper_init :: proc(rom: ^ROM) -> Mapper {
+	mapper_number := (rom.header.flags_7.mapper_high_nibble << 4) | rom.header.flags_6.mapper_low_nibble
+
+	switch mapper_number {
+	case 0:
+		return new(NROM)
+	}
+
+	return nil
+}
+
+mapper_free :: proc(mapper: Mapper) {
+	switch m in mapper {
+	case ^NROM:
+		free(m)
+	}
+}

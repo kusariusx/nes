@@ -8,7 +8,7 @@ import "core:time"
 TARGET_FPS :: 60.0
 FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
 
-ROM_PATH :: "test/cpu/cpu-interrupts/5-branch_delays_irq.nes"
+ROM_PATH :: "games/Super_mario_brothers.nes"
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -33,16 +33,22 @@ main :: proc() {
 	}
 	defer rom_free(rom)
 
-	mapper := NROM{}
+	mapper := mapper_init(rom)
+	if mapper == nil {
+		fmt.eprintfln("mapper is not supported")
+		return
+	}
+	defer mapper_free(mapper)
+
 	ppu := PPU{}
 	
 	ppu_bus := NES_PPU_Bus{
-		mapper = &mapper,
+		mapper = mapper,
 		rom = rom,
 	}
 
 	cpu_bus := NES_CPU_Bus{
-		mapper = &mapper,
+		mapper = mapper,
 		ppu = &ppu,
 		ppu_bus = &ppu_bus,
 		rom = rom,
