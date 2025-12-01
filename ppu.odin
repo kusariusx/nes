@@ -80,7 +80,7 @@ PPU :: struct {
     sprite_shifter_pattern_low: [8]u8, 
     sprite_shifter_pattern_high: [8]u8, 
     sprite_attributes: [8]u8,
-    sprite_x_position: [8]u8,
+    sprite_x_position: [8]u8, // These will be decrementing each rendering cycle; when 0 - sprite becomes visible
 
     // Latches to temporary store fetched sprite data
     sprite_y_position: u8,
@@ -247,8 +247,9 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 }
             }
 
+            // Sprite fetching, happens on both visible scanlines and pre-render scanline
             switch p.scanline_cycle {
-            case 257 ..= 320: // Sprite fetching, happens on both visible scanlines and pre-render scanline
+            case 257 ..= 320:
                 sprite_idx := (p.scanline_cycle - 257) / 8
                 secondary_oam_pos := sprite_idx * 4
 
@@ -272,14 +273,47 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 }
             }
 
+            // Background and sprite rendering
             if is_visible_scanline && is_rendering_cycle {
-                color, palette: u16
+                // Decrement sprite X counters
+                for i in 0 ..< 8 {
+                    if p.sprite_x_position[i] > 0 {
+                        p.sprite_x_position[i] -= 1
+                    }
+                }
+
                 pixel_x := p.scanline_cycle - 1
 
+                color, palette: u16
+                background_color, background_palette: u16
+                sprite_color, sprite_palette, sprite_priority: u8
+
+                // Handle disable and "show leftmost 8 pixels" flags
                 if !is_background_enabled || (pixel_x < 8 && p.PPUMASK.m == 0) {
-                    color, palette = 0, 0
+                    background_color, background_palette = 0, 0
                 } else {
-                    color, palette = ppu_get_background_pixel(p) 
+                    background_color, background_palette = ppu_get_background_pixel(p)
+                }
+
+                if !is_sprite_enabled || (pixel_x < 8 && p.PPUMASK.M == 0) {
+                    sprite_color, sprite_palette, sprite_priority = 0, 0, 0
+                } else {
+                    sprite_color, sprite_palette, sprite_priority = ppu_get_sprite_pixel(p)
+                }
+
+                // After pixel extraction, shift active/visible sprites
+                for i in 0 ..< 8 {
+                    if p.sprite_x_position[i] == 0 { 
+                        p.sprite_shifter_pattern_low[i] <<= 1
+                        p.sprite_shifter_pattern_high[i] <<= 1
+                    }
+                }
+
+                // Determine what pixel to draw
+                if (sprite_color != 0 && sprite_priority == 0) || background_color == 0 { // Sprite pixel wins
+                    color, palette = u16(sprite_color), u16(sprite_palette)
+                } else { // Background pixel wins
+                    color, palette = background_color, background_palette
                 }
 
                 // Calculate palette RAM address
@@ -298,8 +332,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 p.framebuffer[pixel_index] = color_index
             }
 
-            // Background fetching
-            // Happens on both visible scanlines and pre-render scanline
+            // Background fetching, happens on both visible scanlines and pre-render scanline
             if is_rendering_cycle || is_prefetch_cycle {
                 switch p.scanline_cycle % 8 {
                 case 1:
@@ -362,6 +395,31 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             p.is_odd_frame = !p.is_odd_frame
         }
     }
+}
+
+// Finds sprite pixel that needs to be drawn.
+// This function does not account for priority attribute bit - sprite pixel still has to be
+// evaluated against background to determine which one to draw.
+ppu_get_sprite_pixel :: proc(p: ^PPU) -> (color: u8, palette: u8, priority: u8) {
+    for i in 0 ..< 8 {
+        if p.sprite_x_position[i] != 0 { // Skip if sprite is not yet active
+            continue
+        }
+        
+        bit_0 := p.sprite_shifter_pattern_low[i] >> 7
+        bit_1 := p.sprite_shifter_pattern_high[i] >> 7
+        color = (bit_1 << 1) | bit_0
+        
+        if color != 0 { // Opaque/non-transparent
+            palette = (p.sprite_attributes[i] & 0x03) + 4 // Bits 0-1, encode values 4-7
+            priority = (p.sprite_attributes[i] >> 5) & 1 // Bit 5
+            
+            // Sprites earlier in the OAM have higher priority, so we can return the first opaque pixel we find
+            return
+        }
+    }
+    
+    return 0, 0, 0 // No opaque sprite found
 }
 
 reverse_bits :: proc(n: u8) -> u8 {
