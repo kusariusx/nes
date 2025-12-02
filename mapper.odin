@@ -1,5 +1,14 @@
 package main
 
+import "core:mem"
+
+Mapper_Initialization_Error :: union #shared_nil {
+    mem.Allocator_Error,
+    enum {
+        MAPPER_NOT_SUPPORTED = 1,
+    }
+}
+
 Mapper :: union {
     ^NROM,
 }
@@ -41,15 +50,19 @@ mapper_ppu_write :: proc(mapper: Mapper, rom: ^ROM, address: u16, value: u8) -> 
     return false
 }
 
-mapper_init :: proc(rom: ^ROM) -> Mapper {
-	mapper_number := (rom.header.flags_7.mapper_high_nibble << 4) | rom.header.flags_6.mapper_low_nibble
+mapper_number :: proc(rom: ^ROM) -> u8 {
+    return (rom.header.flags_7.mapper_high_nibble << 4) | rom.header.flags_6.mapper_low_nibble
+}
+
+mapper_init :: proc(rom: ^ROM) -> (Mapper, Mapper_Initialization_Error) {
+	mapper_number := mapper_number(rom)
 
 	switch mapper_number {
 	case 0:
 		return new(NROM)
 	}
 
-	return nil
+	return nil, .MAPPER_NOT_SUPPORTED
 }
 
 mapper_free :: proc(mapper: Mapper) {

@@ -8,7 +8,7 @@ import "core:time"
 TARGET_FPS :: 60.0
 FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
 
-ROM_PATH :: "games/Super_mario_brothers.nes"
+ROM_PATH :: "test/ppu/spritecans-2011/spritecans.nes"
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -33,9 +33,14 @@ main :: proc() {
 	}
 	defer rom_free(rom)
 
-	mapper := mapper_init(rom)
-	if mapper == nil {
-		fmt.eprintfln("mapper is not supported")
+	mapper, err_mapper := mapper_init(rom)
+	if err_mapper != nil {
+		if err_mapper == .MAPPER_NOT_SUPPORTED {
+			fmt.eprintfln("mapper %d is not supported", mapper_number(rom))
+		} else {
+			fmt.eprintfln("unable to initialize mapper: %v", err_mapper)
+		}
+
 		return
 	}
 	defer mapper_free(mapper)
