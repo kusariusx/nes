@@ -71,16 +71,17 @@ nes_cpu_bus_resolve_read :: proc(b: ^NES_CPU_Bus, address: u16) -> u8 {
             // We return data from the internal buffer, i.e. all reads are delayed
             result := b.ppu.ppudata_read_buffer
 
-            // Update buffer with current read
-            b.ppu.ppudata_read_buffer = value
-
             // Special handling for palette RAM - these reads are unbuffered
             if b.ppu.v >= 0x3F00 && b.ppu.v <= 0x3FFF {
                 result = value // Replace result with current/unbuffered data
 
-                // TODO: When reading palette memory, the internal buffer is not filled with palette data,
+                // When reading palette memory, the internal buffer is not filled with palette data,
                 // but with data "underneath" the palette memory in PPU address space - this is usually the 
-                // mirrored nametable.
+                // mirrored nametable. Subtract 0x1000 to mirror 0x3XXX addresses into 0x2XXX.
+                b.ppu.ppudata_read_buffer = ppu_bus_read(b.ppu_bus, b.ppu.v - 0x1000)
+            } else {
+                // Update buffer with current read
+                b.ppu.ppudata_read_buffer = value
             }
 
             // Auto-increment v based on PPUCTRL.I
