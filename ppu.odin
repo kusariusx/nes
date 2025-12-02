@@ -388,8 +388,15 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             if p.scanline_cycle == 257 {
                 ppu_transfer_x(p)
 
-                // After sprite evaluation and rendering, transfer flag to be able to detect sprite 0 hit on the next scanline
-                p.sprite_0_on_current_scanline = p.sprite_eval_sprite_0_present
+                // After sprite evaluation and rendering, remember sprite 0 presense to be able 
+                // to detect sprite 0 hit on the next scanline.
+                if is_visible_scanline {
+                    p.sprite_0_on_current_scanline = p.sprite_eval_sprite_0_present
+                } else {
+                    // On pre-render scanline, no evaluation happens, so sprite_eval_sprite_0_present
+                    // contains stale data from scanline 239. Reset it to avoid accidentally passing it on to the next frame.
+                    p.sprite_0_on_current_scanline = false
+                }
             }
             
             if is_pre_render_scanline && p.scanline_cycle >= 280 && p.scanline_cycle <= 304 {
