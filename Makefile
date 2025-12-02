@@ -2,3 +2,6 @@
 
 test:
 	odin test . --all-packages --o:speed
+
+run:
+	odin run . --o:speed
