@@ -39,6 +39,7 @@ PPU :: struct {
     PPUDATA:   u8,
 
     ppudata_read_buffer: u8,
+    io_bus_value: u8,
 
     oam: [256]u8, // Object Attribute Memory
     secondary_oam: [32]u8,
@@ -90,6 +91,111 @@ PPU :: struct {
     sprite_tile_number: u8,
 
     framebuffer: [256 * 240]u8,
+}
+
+ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
+    switch reg {
+    case 2: // PPUSTATUS
+        value := u8(p.PPUSTATUS)
+
+        // Reading PPUSTATUS has some side effects
+        p.PPUSTATUS.V = 0
+        p.w = 0
+
+        // Only bits 5-7 of the value are loaded onto the bus, others are left unchanged
+        p.io_bus_value = (p.io_bus_value & 0x1F) | (value & 0xE0)
+    case 4: // OAMDATA
+        // TODO: if OAMDATA is read during rendering, different values are returned (based on sprite evaluation state)
+        p.io_bus_value = p.oam[p.OAMADDR]
+    case 7: // PPUDATA
+        // Read current data
+        value := ppu_bus_read(b, p.v)
+        result: u8
+
+        // Special handling for palette RAM - these reads are unbuffered
+        if p.v >= 0x3F00 && p.v <= 0x3FFF {
+            // Return unbuffered data
+            result = value
+
+            // When reading palette memory, the internal buffer is not filled with palette data,
+            // but with data "underneath" the palette memory in PPU address space - this is usually the 
+            // mirrored nametable. Subtract 0x1000 to mirror 0x3XXX addresses into 0x2XXX.
+            p.ppudata_read_buffer = ppu_bus_read(b, p.v - 0x1000)
+        } else {
+            // Return data from the internal buffer, i.e. all reads are delayed
+            result = p.ppudata_read_buffer
+
+            // Update buffer with current read
+            p.ppudata_read_buffer = value
+        }
+
+        // Auto-increment v based on PPUCTRL.I
+        p.v += p.PPUCTRL.I == 0 ? 1 : 32
+
+        p.io_bus_value = result
+    }
+
+    return p.io_bus_value
+}
+
+ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
+    // Regardless of the register (even read-only), value is loaded onto the I/O bus
+    p.io_bus_value = value
+
+    switch reg {
+    case 0: // PPUCTRL
+        orig_nmi_enabled := p.PPUCTRL.V
+        p.PPUCTRL = PPUCTRL_Bits(value)
+
+        // If VBlank NMI was enabled during VBlank - request NMI immediately
+        if orig_nmi_enabled == 0 && p.PPUCTRL.V == 1 && p.PPUSTATUS.V == 1 {
+            b.cpu_bus.nmi_pending = true
+        }
+
+        // Update bits 10 and 11 of PPU's internal t register
+        p.t = (p.t & 0xF3FF) | (u16(p.PPUCTRL.NN) << 10)
+    case 1: // PPUMASK
+        p.PPUMASK = PPUMASK_Bits(value)
+    case 3: // OAMADDR
+        p.OAMADDR = value
+    case 4: // OAMDATA
+        p.oam[p.OAMADDR] = value
+        p.OAMADDR += 1 // Will wrap automatically since OAMADDR is u8
+    case 5: // PPUSCROLL
+        // Note: I could've stored these values in separate variables - it would've been simpler.
+        // But I want to emulate the original hardware behavior, so I'm using PPU internal registers to
+        // store these values (in rather obscure format).
+
+        // Note: t and v are 15-bit registers, but I'm using full 16-bit masks for clarity
+        // Odin allows underscores in numeric literals - very convenient for separating bytes.
+
+        if p.w == 0 { // First write (X scroll)
+            p.x = value & 0b111 // Set fine X scroll
+            p.t = (p.t & 0b11111111_11100000) | (u16(value) >> 3) // Set coarse X scroll
+            p.w = 1 // Toggle w
+        } else { // Second write (Y scroll)
+            p.t = (p.t & 0b10001111_11111111) | (u16(value & 0b00000111) << 12) // Set fine Y scroll
+            p.t = (p.t & 0b11111100_00011111) | (u16(value & 0b11111000) << 2) // Set coarse Y scroll
+            p.w = 0 // Toggle w back
+        }
+    case 6: // PPUADDR
+        if p.w == 0 { // First write (high byte)
+            p.t = (p.t & 0b10000000_11111111) | (u16(value & 0b00111111) << 8) // Set bits 8-13 and clear bit 14
+            p.w = 1 // Toggle w
+        } else { // Second write (low byte)
+            p.t = (p.t & 0b11111111_00000000) | u16(value) // Set bits 0-7
+            p.v = p.t // Copy t into v
+            p.w = 0 // Toggle w back
+        }
+    case 7: // PPUDATA
+        ppu_bus_write(b, p.v, value)
+
+        // Auto-increment v based on PPUCTRL.I
+        p.v += p.PPUCTRL.I == 0 ? 1 : 32
+
+        // TODO: when writing during rendering, instead of auto-increment, v is updated in a weird way,
+        // causing simultaneous coarse X increment and Y increment.
+    }
 }
 
 // PPU runs 3x faster than CPU, so for each CPU tick, we tick PPU 3 times
