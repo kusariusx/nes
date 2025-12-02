@@ -127,10 +127,13 @@ test_instructions_nestest :: proc(t: ^testing.T) {
     testing.expect_value(t, err, nil)
     defer rom_free(rom)
 
-    m := NROM{}
+    mapper := NROM{}
+    apu := APU{}
+
     bus := NES_CPU_Bus{
         rom = rom,
-        mapper = &m,
+        mapper = &mapper,
+        apu = &apu,
     }
 
     cpu := CPU{}
@@ -172,11 +175,13 @@ test_instructions_blargg :: proc(t: ^testing.T) {
         testing.expect_value(t, err, nil)
         defer rom_free(rom)
 
-
         mapper := NROM{}
+        apu := APU{}
+
         cpu_bus := NES_CPU_Bus{
             rom = rom,
             mapper = &mapper,
+            apu = &apu,
         }
 
         cpu := CPU{}
