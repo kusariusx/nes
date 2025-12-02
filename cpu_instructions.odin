@@ -207,7 +207,7 @@ cld :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Decimal
 }
 
 cli :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Interrupt Disable
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 0 })
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 0; cpu.irq_delayed = true })
 }
 
 clv :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Overflow
@@ -674,7 +674,8 @@ plp :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Pull P
         // Pull P from stack ignoring/preserving bits 4 and 5, done
         p := (u8(cpu.P) & 0b00110000) | (stack_pop(cpu, bus) & 0b11001111)
         cpu.P = CPU_Flags(p)
-        
+
+        cpu.irq_delayed = true
         cpu_instruction_done(cpu)
     }
 }
@@ -749,6 +750,13 @@ rti :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Return from Interrupt
         // Pull P from stack ignoring/preserving bits 4 and 5
         p := (u8(cpu.P) & 0b00110000) | (stack_pop(cpu, bus) & 0b11001111)
         cpu.P = CPU_Flags(p)
+
+        // RTI restores I on cycle 4, but IRQ poll happens on cycle 5 (second-to-last).
+        // Unlike CLI/SEI/PLP where I changes after the poll, RTI's poll sees the restored I.
+        // So if I=1 was restored, the latched IRQ should be cancelled.
+        if cpu.P.I == 1 { 
+            cpu.irq_latched = false
+        }
     case 5:
         // Pull PCL from stack
         cpu.PCL = stack_pop(cpu, bus)
@@ -829,7 +837,7 @@ sed :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Set Decimal
 }
 
 sei :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Set Interrupt Disable
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 1 })
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 1; cpu.irq_delayed = true })
 }
 
 sta_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Store A

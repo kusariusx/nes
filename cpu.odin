@@ -37,9 +37,11 @@ CPU :: struct {
     },
 
 	halt: bool,
+	irq_delayed: bool,
+	irq_latched: bool, // Is IRQ guaranteed to be handled next?
 
 	// To control DMA cadence - DMAs can only start on read cycles. If they start on write cycles, they wait.
-	read_cycle: bool,
+	is_read_cycle: bool,
 
 	// Registers
 	A:                   byte, // Accumulator
@@ -62,7 +64,7 @@ Instruction :: struct {
 
 cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	// Alternate between read and write cycles
-	cpu.read_cycle = !cpu.read_cycle
+	cpu.is_read_cycle = !cpu.is_read_cycle
 
 	// Handle OAM DMA
 	if bus.oam_dma_pending {
@@ -70,7 +72,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		cpu_bus_read(bus, cpu.PC)
 
 		// We should wait for either 2 or 1 cycles depending on whether this is a read or a write cycle
-		if cpu.read_cycle {
+		if cpu.is_read_cycle {
 			// Do nothing, let oam_dma_pending remain true and skip this cycle
 		} else {
 			// We only need to halt for 1 (current) cycle
@@ -82,7 +84,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	}
 
 	if bus.oam_dma_active {
-		if cpu.read_cycle { // Read from page
+		if cpu.is_read_cycle { // Read from page
 			bus.oam_dma_data = cpu_bus_read(bus, bus.oam_dma_address)
 		} else { // Write to OAMDATA
 			cpu_bus_write(bus, OAMDATA_ADDRESS, bus.oam_dma_data)
@@ -111,15 +113,28 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		// Even when handling interrupts, this bus read is still the first cycle of the interrupt sequence
 		opcode := cpu_bus_read(bus, cpu.PC)
 
+		should_handle_irq := bus.irq_pending && cpu.P.I == 0
+
 		// Check for interrupts
 		// Note: when handling interrupts, writes to PC are suppressed, hence not incrementing it
 		if bus.nmi_pending {
 			bus.nmi_pending = false
 			cpu.instruction = &NMI_Handler
-		} else if bus.irq_pending && cpu.P.I == 0 {
+		} else if (should_handle_irq && !cpu.irq_delayed) || cpu.irq_latched {
+			cpu.irq_latched = false
 			bus.irq_pending = false
 			cpu.instruction = &IRQ_Handler
 		} else {
+			// Instructions like CLI delay IRQ handling until the end of the next instruction.
+			// If IRQ handling was delayed, decode and execute an instruction normally, but clear the flag
+			// so that IRQ is handled after this instruction.
+			if cpu.irq_delayed {
+				cpu.irq_delayed = false
+
+				// Guarantee that IRQ will be handled regardless of the effect of the next instruction
+				cpu.irq_latched = should_handle_irq
+			}
+
 			// Decode instruction
 			cpu.instruction = &Instructions[opcode]
 
@@ -171,7 +186,7 @@ cpu_reset :: proc(cpu: ^CPU, bus: CPU_Bus) {
 	cpu.PCL = cpu_bus_read(bus, 0xFFFC)
 	cpu.PCH = cpu_bus_read(bus, 0xFFFD)
 
-	cpu.read_cycle = false
+	cpu.is_read_cycle = false
 }
 
 stack_push :: proc(cpu: ^CPU, bus: CPU_Bus, value: byte) {
