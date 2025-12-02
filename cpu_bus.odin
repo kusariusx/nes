@@ -1,11 +1,12 @@
 package main
 
-import "core:text/regex/virtual_machine"
 NES_CPU_Bus :: struct {
 	ram: [2 * 1024]u8, // 2 KB internal RAM
 
     ppu: ^PPU,
     ppu_bus: ^NES_PPU_Bus,
+
+    apu: ^APU,
 
     rom: ^ROM,
     mapper: Mapper,
@@ -60,6 +61,7 @@ nes_cpu_bus_resolve_read :: proc(b: ^NES_CPU_Bus, address: u16) -> (value: u8, h
         effective_address := u8(address & 0x7) // Mask to 3 bits (8 registers)
         return ppu_read_register(b.ppu, b.ppu_bus, effective_address), true
     case 0x4000 ..= 0x4017: // APU and IO registers
+        return apu_read_register(b.apu, address)
     case 0x4018 ..= 0x401F: // Additional APU and IO functionality which is normally disabled
     case 0x4020 ..= 0xFFFF: // Unmapped - cartridges are free to map this area to anything 
     }
@@ -82,6 +84,8 @@ nes_cpu_bus_resolve_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
             b.oam_dma_pending = true
             b.oam_dma_address = u16(value) << 8
         }
+
+        apu_write_register(b.apu, address, value)
     case 0x4018 ..= 0x401F: // Additional APU and IO functionality which is normally disabled
     case 0x4020 ..= 0xFFFF: // Unmapped - cartridges are free to map this area to anything 
     }

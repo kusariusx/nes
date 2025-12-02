@@ -8,7 +8,7 @@ import "core:time"
 TARGET_FPS :: 60.0
 FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
 
-ROM_PATH :: "test/ppu/spritecans-2011/spritecans.nes"
+ROM_PATH :: "test/cpu/cpu-interrupts/3-nmi_and_irq.nes"
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -46,6 +46,7 @@ main :: proc() {
 	defer mapper_free(mapper)
 
 	ppu := PPU{}
+	apu := APU{}
 	
 	ppu_bus := NES_PPU_Bus{
 		mapper = mapper,
@@ -57,6 +58,7 @@ main :: proc() {
 		ppu = &ppu,
 		ppu_bus = &ppu_bus,
 		rom = rom,
+		apu = &apu,
 	}
 
 	ppu_bus.cpu_bus = &cpu_bus
@@ -79,6 +81,11 @@ main :: proc() {
 			ppu_tick(&ppu, &ppu_bus)
 			ppu_tick(&ppu, &ppu_bus)
 			ppu_tick(&ppu, &ppu_bus)
+
+			// Tick APU every other CPU cycle
+			if cpu.is_read_cycle {
+				apu_tick(&apu, &cpu_bus)
+			}
 		}
 		
 		ui_update_texture(&ui, ppu.framebuffer[:])
