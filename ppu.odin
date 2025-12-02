@@ -316,6 +316,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                     sprite_0_hit := // Sprite 0 is hit when...
                         p.sprite_x_position[0] == 0 && // Sprite 0 is active
                         p.PPUSTATUS.S == 0 && // It was not hit earlier on the scanline
+                        is_sprite_enabled && // Sprite rendering is enabled - we need to check this because we read sprite data directly from shifters
                         background_color != 0 && sprite_0_color != 0 && // Both background and sprite 0 are opaque
                         // Sprite 0 hit is not detected when rendering is disabled for leftmost 8 pixels.
                         // We are either in the safe zone where this restriction does not apply (pixel_x >= 8),
