@@ -75,7 +75,9 @@ PPU :: struct {
     sprite_eval_secondary_oam_pos: u8,
     sprite_eval_done: bool,
     sprite_eval_pending_reads: u8, // To mark that we need to read 3 more OAM bytes during overflow phase
-    sprite_eval_sprite_0_present: bool, // Is sprite 0 present on a scanline
+    sprite_eval_sprite_0_present: bool, // Is sprite 0 present during evaluation (will be drawn on the next scanline)
+
+    sprite_0_on_current_scanline: bool,
 
     // Shifters for sprite drawing
     sprite_shifter_pattern_low: [8]u8, 
@@ -280,13 +282,6 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
             // Background and sprite rendering
             if is_visible_scanline && is_rendering_cycle {
-                // Decrement sprite X counters
-                for i in 0 ..< 8 {
-                    if p.sprite_x_position[i] > 0 {
-                        p.sprite_x_position[i] -= 1
-                    }
-                }
-
                 pixel_x := p.scanline_cycle - 1
 
                 color, palette: u16
@@ -307,7 +302,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 }
 
                 // Sprite 0 hit detection
-                if p.sprite_eval_sprite_0_present {
+                if p.sprite_0_on_current_scanline {
                     // If sprite 0 is present on the current scanline, it is guaranteed to be first in our shifters/latches
                     sprite_0_bit_0 := p.sprite_shifter_pattern_low[0] >> 7
                     sprite_0_bit_1 := p.sprite_shifter_pattern_high[0] >> 7
@@ -334,6 +329,13 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                     if p.sprite_x_position[i] == 0 {
                         p.sprite_shifter_pattern_low[i] <<= 1
                         p.sprite_shifter_pattern_high[i] <<= 1
+                    }
+                }
+
+                // Decrement sprite X counters
+                for i in 0 ..< 8 {
+                    if p.sprite_x_position[i] > 0 {
+                        p.sprite_x_position[i] -= 1
                     }
                 }
 
@@ -385,6 +387,9 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             
             if p.scanline_cycle == 257 {
                 ppu_transfer_x(p)
+
+                // After sprite evaluation and rendering, transfer flag to be able to detect sprite 0 hit on the next scanline
+                p.sprite_0_on_current_scanline = p.sprite_eval_sprite_0_present
             }
             
             if is_pre_render_scanline && p.scanline_cycle >= 280 && p.scanline_cycle <= 304 {
