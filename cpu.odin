@@ -1,7 +1,5 @@
 package main
 
-import "core:fmt"
-
 LOW  :: 0
 HIGH :: 1
 
@@ -24,6 +22,9 @@ CPU_Flags :: bit_field byte {
 	N:      byte | 1, // Negative
 }
 
+NMI_Vector :: 0xFFFA
+IRQ_Vector :: 0xFFFE
+
 CPU :: struct {
 	instruction:            ^Instruction, // Current running instruction
 	instruction_cycle:      u8, // Current cycle within an instruction
@@ -37,8 +38,13 @@ CPU :: struct {
     },
 
 	halt: bool,
-	irq_delayed: bool,
-	irq_latched: bool, // Is IRQ guaranteed to be handled next?
+
+	nmi_line_prev: bool,
+
+	nmi_detected: bool, 
+	irq_detected: bool,
+
+	interrupt_vector: u16,
 
 	// To control DMA cadence - DMAs can only start on read cycles. If they start on write cycles, they wait.
 	is_read_cycle: bool,
@@ -60,6 +66,22 @@ CPU :: struct {
 Instruction :: struct {
 	mnemonic: string, // For disassembly/debug
 	handler:  proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8),
+}
+
+// Interrupts are usually polled on the second-to-last cycle of an instruction.
+cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
+	b, ok := b.(^NES_CPU_Bus)
+	if !ok {
+		return // No-op for test bus
+	}
+
+	// IRQs can have various sources - they are all connected to the same IRQ line, being effectively OR'ed.
+	// IRQ line will stay low/active until all interrupt sources acknowledge their interrupt.
+	c.irq_detected = 
+		(b.apu.status >> 6) & 1 == 1 // APU Frame Counter
+
+	// I flag is a master control for IRQ generation
+	c.irq_detected &&= c.P.I == 0
 }
 
 cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
@@ -113,39 +135,42 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		// Even when handling interrupts, this bus read is still the first cycle of the interrupt sequence
 		opcode := cpu_bus_read(bus, cpu.PC)
 
-		should_handle_irq := bus.irq_pending && cpu.P.I == 0
-
 		// Check for interrupts
 		// Note: when handling interrupts, writes to PC are suppressed, hence not incrementing it
-		if bus.nmi_pending {
-			bus.nmi_pending = false
-			cpu.instruction = &NMI_Handler
-		} else if (should_handle_irq && !cpu.irq_delayed) || cpu.irq_latched {
-			cpu.irq_latched = false
-			bus.irq_pending = false
-			cpu.instruction = &IRQ_Handler
+		if cpu.nmi_detected {
+			cpu.nmi_detected = false // Acknowledge NMI
+			cpu.irq_detected = false // Forget about IRQ
+
+			cpu.interrupt_vector = NMI_Vector
+			cpu.instruction = &Interrupt_Handler
+		} else if cpu.irq_detected {
+			// We do not acknowledge IRQs - software is responsible for this
+			cpu.irq_detected = false 
+			cpu.interrupt_vector = IRQ_Vector
+			cpu.instruction = &Interrupt_Handler
 		} else {
-			// Instructions like CLI delay IRQ handling until the end of the next instruction.
-			// If IRQ handling was delayed, decode and execute an instruction normally, but clear the flag
-			// so that IRQ is handled after this instruction.
-			if cpu.irq_delayed {
-				cpu.irq_delayed = false
-
-				// Guarantee that IRQ will be handled regardless of the effect of the next instruction
-				cpu.irq_latched = should_handle_irq
-			}
-
 			// Decode instruction
 			cpu.instruction = &Instructions[opcode]
 
 			// Increment PC
 			cpu.PC += 1
 		}
-	} else { // We are in a middle of executing an instruction
-		cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
 	}
 
+	// Most instructions don't have special handling for the 1-st cycle (almost all instruction handlers
+	// start their cycle switch from 2), but some instructions need to have additional logic at cycle 1 for 
+	// interrupt polling.
+	cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
+
 	cpu.instruction_cycle += 1
+
+	// NMI edge detection at the end of each cycle
+	// PPUSTATUS.V and PPUCTRL.V and AND'ed together and fed to CPU's NMI line
+	nmi_line := bus.ppu.PPUSTATUS.V == 1 && bus.ppu.PPUCTRL.V == 1
+	if !cpu.nmi_line_prev && nmi_line {
+		cpu.nmi_detected = true
+	}
+	cpu.nmi_line_prev = nmi_line
 }
 
 cpu_tick_test_bus :: proc(cpu: ^CPU, bus: ^Test_CPU_Bus) {
@@ -157,10 +182,9 @@ cpu_tick_test_bus :: proc(cpu: ^CPU, bus: ^Test_CPU_Bus) {
 		
 		cpu.instruction_cycle = 1
 		cpu.PC += 1
-	} else { 
-		cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
-	}
+	} 
 
+	cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
 	cpu.instruction_cycle += 1
 }
 
@@ -186,6 +210,11 @@ cpu_reset :: proc(cpu: ^CPU, bus: CPU_Bus) {
 	cpu.PCL = cpu_bus_read(bus, 0xFFFC)
 	cpu.PCH = cpu_bus_read(bus, 0xFFFD)
 
+	cpu.nmi_detected = false
+	cpu.irq_detected = false
+
+	cpu.nmi_line_prev = false
+
 	cpu.is_read_cycle = false
 }
 
@@ -200,11 +229,15 @@ stack_pop :: proc(cpu: ^CPU, bus: CPU_Bus) -> byte {
 	return cpu_bus_read(bus, STACK_START + u16(cpu.S))
 }
 
-interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, vector_low: u16, vector_high: u16) {
+interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, is_brk: bool) {
 	switch cycle {
 	case 2:
 		// Dummy read from PC
 		cpu_bus_read(bus, cpu.PC)
+
+		if is_brk {
+			cpu.PC += 1
+		}
 	case 3:
 		// Push PCH on the stack
 		stack_push(cpu, bus, cpu.PCH)
@@ -214,31 +247,32 @@ interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, vector_lo
 	case 5:
 		// Push P on the stack (with B flag clear)
 		p := cpu.P
-		p.B = 0
+		p.B = is_brk ? 1 : 0
 
 		stack_push(cpu, bus, byte(p))
 
-		// TODO: implement interrupt hijacking on this cycle. For BRK as well.
+		if cpu.nmi_detected {
+			cpu.nmi_detected = false  // Acknowledge the hijacking NMI
+			cpu.irq_detected = false  // IRQ forgotten when NMI wins
+			cpu.interrupt_vector = NMI_Vector
+		} else if is_brk {
+			// BRK uses IRQ vector if not hijacked (BRK doesn't set vector at fetch)
+			cpu.interrupt_vector = IRQ_Vector
+		}
 	case 6:
 		// Fetch PCL, set I flag
-		cpu.PCL = cpu_bus_read(bus, vector_low)
+		cpu.PCL = cpu_bus_read(bus, cpu.interrupt_vector)
 		cpu.P.I = 1
 	case 7:
 		// Fetch PCH, set flags, done
-		cpu.PCH = cpu_bus_read(bus, vector_high)
+		cpu.PCH = cpu_bus_read(bus, cpu.interrupt_vector + 1)
 		cpu_instruction_done(cpu)
 	}
 }
 
-// Ephemeral "instructions" implementing the interrupt handling sequence
-NMI_Handler := Instruction{
+// Ephemeral "instruction" implementing the interrupt handling sequence
+Interrupt_Handler := Instruction{
 	handler = proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
-		interrupt_sequence_handler(cpu, bus, cycle, 0xFFFA, 0xFFFB)
-	}
-}
-
-IRQ_Handler := Instruction{
-	handler = proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
-		interrupt_sequence_handler(cpu, bus, cycle, 0xFFFE, 0xFFFF)
+		interrupt_sequence_handler(cpu, bus, cycle, false)
 	}
 }

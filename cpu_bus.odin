@@ -11,10 +11,6 @@ NES_CPU_Bus :: struct {
     rom: ^ROM,
     mapper: Mapper,
 
-    // CPU will check these, and other components will write into them
-    nmi_pending: bool,
-    irq_pending: bool,
-
     oam_dma_pending: bool,
     oam_dma_active: bool,
     oam_dma_address: u16,

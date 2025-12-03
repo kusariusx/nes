@@ -3,6 +3,8 @@ package main
 // Immediate addressing
 imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: u8)) {
     switch cycle {
+    case 1:
+        cpu_poll_interrupts(cpu, bus)
     case 2:
         // Fetch value, increment PC
         value := cpu_bus_read(bus, cpu.PC)
@@ -23,6 +25,8 @@ zpg_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus
         // Fetch address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
+
+        cpu_poll_interrupts(cpu, bus)
     case 3:
         // Fetch value from effective address
         value := cpu_bus_read(bus, u16(cpu.instruction_operand))
@@ -46,6 +50,8 @@ zpgi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action
         // This read is performed by the hardware but does not play any role - the result is discarded
         cpu_bus_read(bus, u16(cpu.instruction_operand))
         cpu.instruction_operand += index_register
+
+        cpu_poll_interrupts(cpu, bus)
     case 4:    
         // Fetch value from effective address, perform action, done
         value := cpu_bus_read(bus, u16(cpu.instruction_operand))
@@ -65,6 +71,8 @@ abs_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus
         // Fetch high byte of address, increment PC
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
+
+        cpu_poll_interrupts(cpu, bus)
     case 4:    
         // Fetch value from effective address, perform action, done
         value := cpu_bus_read(bus, cpu.instruction_operands.whole)
@@ -86,6 +94,11 @@ absi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
         cpu.instruction_operands.bytes[LOW] += index_register
         cpu.PC += 1
+
+        // Poll for interrupts of page boundary was not crossed
+        if cpu.instruction_operands.bytes[LOW] >= index_register {
+            cpu_poll_interrupts(cpu, bus)
+        }
     case 4:
         // Read from effective address
         value := cpu_bus_read(bus, cpu.instruction_operands.whole)
@@ -94,6 +107,8 @@ absi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action
             // If page boundary was crossed (meaning if there was an overflow when adding index to low address byte), 
             // fix the high byte of effective addess
             cpu.instruction_operands.bytes[HIGH] += 1
+
+            cpu_poll_interrupts(cpu, bus)
         } else {
             // If page boundary was not crossed, perform action and complete the instruction
             action(cpu, bus, value)
@@ -126,6 +141,8 @@ indx_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bu
     case 5:
         // Fetch effective address high byte
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, u16(cpu.instruction_operand+1))
+
+        cpu_poll_interrupts(cpu, bus)
     case 6:
         // Read from effective address, perform action, done
         value := cpu_bus_read(bus, cpu.instruction_operands.whole)
@@ -148,12 +165,18 @@ indy_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bu
         // Fetch effective address high byte, add Y to low address byte
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, u16(cpu.instruction_operand+1))
         cpu.instruction_operands.bytes[LOW] += cpu.Y
+
+        if cpu.instruction_operands.bytes[LOW] >= cpu.Y { // No page cross
+            cpu_poll_interrupts(cpu, bus)
+        }
     case 5:
         // Read from effective address, fix high byte if page crossed
         value := cpu_bus_read(bus, cpu.instruction_operands.whole)
 
         if cpu.instruction_operands.bytes[LOW] < cpu.Y { 
             cpu.instruction_operands.bytes[HIGH] += 1
+
+            cpu_poll_interrupts(cpu, bus)
         } else {
             // If page boundary was not crossed, perform action and complete the instruction
             action(cpu, bus, value)
@@ -181,6 +204,8 @@ zpg_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(c
         // Dummy write the value back to effective address, perform action
         cpu_bus_write(bus, u16(cpu.instruction_operand), cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
+
+        cpu_poll_interrupts(cpu, bus)
     case 5:
         // Write the new value to effective address, done
         cpu_bus_write(bus, u16(cpu.instruction_operand), cpu.instruction_temp_value)
@@ -206,6 +231,8 @@ zpgi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_registe
         // Dummy write the back to effective address, perform action
         cpu_bus_write(bus, u16(cpu.instruction_operand), cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
+
+        cpu_poll_interrupts(cpu, bus)
     case 6:
         // Write the new value to effective address, done
         cpu_bus_write(bus, u16(cpu.instruction_operand), cpu.instruction_temp_value)
@@ -231,6 +258,8 @@ abs_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(c
         // Dummy write the value back to effective address, perform action
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
+
+        cpu_poll_interrupts(cpu, bus)
     case 6:
         // Write the new value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
@@ -264,6 +293,8 @@ absi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_registe
         // Dummy write the value back to effective address, perform action
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
+
+        cpu_poll_interrupts(cpu, bus)
     case 7:
         // Write the new value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
@@ -275,6 +306,8 @@ absi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_registe
 // Operand is an 8-bit signed offset for the PC
 rel :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, should_branch: bool) {
     switch cycle {
+    case 1:
+        cpu_poll_interrupts(cpu, bus)
     case 2:
         // Fetch operand, increment PC
         // If branch is not taken - done
@@ -300,6 +333,8 @@ rel :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, should_branch: bool) {
 
         if !page_crossed {
             cpu_instruction_done(cpu)
+        } else {
+            cpu_poll_interrupts(cpu, bus)
         }
     case 4:
         // Fetch opcode of next instruction, fix PCH
@@ -318,6 +353,8 @@ rel :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, should_branch: bool) {
 // Implied addressing - operands are determined by the instruction itself
 implied :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus)) {
     switch cycle {
+    case 1:
+        cpu_poll_interrupts(cpu, bus)
     case 2:
         // Dummy read next instruction byte, perform action, done
         cpu_bus_read(bus, cpu.PC)
@@ -333,6 +370,8 @@ zpg_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
         // Fetch address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
+
+        cpu_poll_interrupts(cpu, bus)
     case 3:
         // Write value to effective address, done
         cpu_bus_write(bus, u16(cpu.instruction_operand), value)
@@ -351,6 +390,8 @@ zpgi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value
         // Read from address, add index to it
         cpu_bus_read(bus, u16(cpu.instruction_operand))
         cpu.instruction_operand += index_register
+
+        cpu_poll_interrupts(cpu, bus)
     case 4:    
         // Write value to effective address, done
         cpu_bus_write(bus, u16(cpu.instruction_operand), value)
@@ -369,6 +410,8 @@ abs_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
         // Fetch high byte of address, increment PC
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
+
+        cpu_poll_interrupts(cpu, bus)
     case 4:    
         // Write value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, value)
@@ -395,6 +438,8 @@ absi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value
         if cpu.instruction_operands.bytes[LOW] < index_register { 
             cpu.instruction_operands.bytes[HIGH] += 1
         }
+
+        cpu_poll_interrupts(cpu, bus)
     case 5:
         // Write value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, value)
@@ -419,6 +464,8 @@ indx_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
     case 5:
         // Fetch effective address high byte
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, u16(cpu.instruction_operand+1))
+
+        cpu_poll_interrupts(cpu, bus)
     case 6:
         // Write value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, value)
@@ -447,6 +494,8 @@ indy_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
         if cpu.instruction_operands.bytes[LOW] < cpu.Y { 
             cpu.instruction_operands.bytes[HIGH] += 1
         }
+
+        cpu_poll_interrupts(cpu, bus)
     case 6:
         // Write value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, value)
@@ -478,6 +527,8 @@ indx_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(
         // Write the value back to effective address, perform action
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
+
+        cpu_poll_interrupts(cpu, bus)
     case 8:
         // Write the new value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
@@ -513,6 +564,8 @@ indy_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(
         // Write the value back to effective address, perform action
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
+
+        cpu_poll_interrupts(cpu, bus)
     case 8:
         // Write the new value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)

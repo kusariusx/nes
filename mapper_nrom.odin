@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 NROM :: struct{
     prg_ram: [0x2000]byte,
     chr_ram: [0x2000]byte,
@@ -25,6 +26,9 @@ nrom_cpu_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_han
     switch address {
     case 0x6000 ..= 0x7FFF: // PRG-RAM
         if r.header.prg_ram_size > 0 {
+            // if address > 0x6004 {
+            //     fmt.printf("%c", value)
+            // }
             effective_address := (address - 0x6000) % r.header.prg_ram_size
             m.prg_ram[effective_address] = value
             

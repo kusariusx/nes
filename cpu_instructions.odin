@@ -94,13 +94,7 @@ asl :: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8) { // Arithmetic Shift Left
 }
 
 asl_a :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { 
-    switch cycle {
-    case 2:
-        // Dummy read next instruction byte, perform action, done
-        cpu_bus_read(bus, cpu.PC)
-        asl(cpu, bus, &cpu.A)
-        cpu_instruction_done(cpu)
-    }
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { asl(cpu, bus, &cpu.A) })
 }
   
 asl_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { 
@@ -160,34 +154,7 @@ bpl :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Plus
 }
 
 brk :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Break
-    switch cycle {
-    case 2:
-        // Dummy read operand, increment PC
-        cpu_bus_read(bus, cpu.PC)
-        cpu.PC += 1
-    case 3:
-        // Push PCH on the stack
-        stack_push(cpu, bus, cpu.PCH)
-    case 4:
-        // Push PCL on the stack
-        stack_push(cpu, bus, cpu.PCL)
-    case 5:
-        // Push P on the stack (with B flag set)
-        p := cpu.P
-        p.B = 1
-
-        stack_push(cpu, bus, byte(p))
-
-        // TODO: implement interrupt hijacking on this cycle.
-    case 6:
-        // Fetch PCL
-        cpu.PCL = cpu_bus_read(bus, 0xFFFE)
-    case 7:
-        // Fetch PCH, set flags, done
-        cpu.PCH = cpu_bus_read(bus, 0xFFFF)
-        cpu.P.I = 1
-        cpu_instruction_done(cpu)
-    }
+    interrupt_sequence_handler(cpu, bus, cycle, true)
 }
 
 bvc :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Branch if Overflow Clear
@@ -207,7 +174,7 @@ cld :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Decimal
 }
 
 cli :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Interrupt Disable
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 0; cpu.irq_delayed = true })
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 0 })
 }
 
 clv :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Clear Overflow
@@ -397,6 +364,8 @@ jmp_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Jump Absolute
         // Fetch low address byte, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
         cpu.PC += 1
+
+        cpu_poll_interrupts(cpu, bus)
     case 3:
         // Copy low address byte to PCL, fetch high address byte to PCH, done
         cpu.PCH = cpu_bus_read(bus, cpu.PC)
@@ -419,6 +388,8 @@ jmp_ind :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     case 4:
         // Fetch low address to latch
         cpu.instruction_temp_value = cpu_bus_read(bus, cpu.instruction_operands.whole)
+
+        cpu_poll_interrupts(cpu, bus)
     case 5:
         // Fetch PCH, copy latch to PCL, done
         cpu.instruction_operands.bytes[LOW] += 1 // Deliberately ignore page crossing and just increment the low byte (hardware bug)
@@ -445,6 +416,8 @@ jsr :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Jump to Subroutine
     case 5:
         // Push PCL on stack
         stack_push(cpu, bus, cpu.PCL)
+
+        cpu_poll_interrupts(cpu, bus)
     case 6:
         // Copy low address byte to PCL, fetch high address byte to PCH, done
         cpu.PCH = cpu_bus_read(bus, cpu.PC)
@@ -621,6 +594,8 @@ pha :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Push A
     case 2:
         // Dummy read next instruction byte
         cpu_bus_read(bus, cpu.PC)
+
+        cpu_poll_interrupts(cpu, bus)
     case 3:
         // Push A on stack, done
         stack_push(cpu, bus, cpu.A)
@@ -633,6 +608,8 @@ php :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Push P
     case 2:
         // Dummy read next instruction byte
         cpu_bus_read(bus, cpu.PC)
+
+        cpu_poll_interrupts(cpu, bus)
     case 3:
         // Push P on stack with B flag set, done
         p := cpu.P
@@ -651,6 +628,8 @@ pla :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Pull A
     case 3:
         // Dummy read on the stack
         cpu_bus_read(bus, STACK_START + u16(cpu.S))
+
+        cpu_poll_interrupts(cpu, bus)
     case 4:
         // Pull A from stack, set flags, done
         cpu.A = stack_pop(cpu, bus)
@@ -670,12 +649,13 @@ plp :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Pull P
     case 3:
         // Dummy read on the stack
         cpu_bus_read(bus, STACK_START + u16(cpu.S))
+
+        cpu_poll_interrupts(cpu, bus)
     case 4:
         // Pull P from stack ignoring/preserving bits 4 and 5, done
         p := (u8(cpu.P) & 0b00110000) | (stack_pop(cpu, bus) & 0b11001111)
         cpu.P = CPU_Flags(p)
 
-        cpu.irq_delayed = true
         cpu_instruction_done(cpu)
     }
 }
@@ -750,16 +730,11 @@ rti :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Return from Interrupt
         // Pull P from stack ignoring/preserving bits 4 and 5
         p := (u8(cpu.P) & 0b00110000) | (stack_pop(cpu, bus) & 0b11001111)
         cpu.P = CPU_Flags(p)
-
-        // RTI restores I on cycle 4, but IRQ poll happens on cycle 5 (second-to-last).
-        // Unlike CLI/SEI/PLP where I changes after the poll, RTI's poll sees the restored I.
-        // So if I=1 was restored, the latched IRQ should be cancelled.
-        if cpu.P.I == 1 { 
-            cpu.irq_latched = false
-        }
     case 5:
         // Pull PCL from stack
         cpu.PCL = stack_pop(cpu, bus)
+
+        cpu_poll_interrupts(cpu, bus)
     case 6:
         // Pull PCH from stack, done
         cpu.PCH = stack_pop(cpu, bus)
@@ -782,6 +757,8 @@ rts :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Return from Subroutine
     case 5:
         // Pull PCH from stack
         cpu.PCH = stack_pop(cpu, bus)
+
+        cpu_poll_interrupts(cpu, bus)
     case 6:
         // Dummy read at the PC, increment PC, done
         cpu_bus_read(bus, cpu.PC)
@@ -837,7 +814,7 @@ sed :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Set Decimal
 }
 
 sei :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Set Interrupt Disable
-    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 1; cpu.irq_delayed = true })
+    implied(cpu, bus, cycle, proc(cpu: ^CPU, bus: CPU_Bus) { cpu.P.I = 1 })
 }
 
 sta_zpg :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Store A
@@ -957,6 +934,8 @@ jam :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 
         // Read the next instruction byte
         cpu_bus_read(bus, cpu.PC)
+
+        cpu_poll_interrupts(cpu, bus)
     case 3:
         // Re-read the next instruction byte
         cpu_bus_read(bus, cpu.PC)
@@ -1239,6 +1218,10 @@ sha_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 4:
         absi_write(cpu, bus, cycle, cpu.Y, 0)
+
+        if cycle == 4 { // Second-to-last cycle
+            cpu_poll_interrupts(cpu, bus)
+        }
     case 5:
         // We need to intercept the 5th cycle of the instruction to get access to effective address (calculated on previous cycles).
         // This instruction is weird and very unstable. General description/observations from my own research:
@@ -1269,6 +1252,10 @@ sha_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 5:
         indy_write(cpu, bus, cycle, 0)
+
+        if cycle == 5 {
+            cpu_poll_interrupts(cpu, bus)
+        }
     case 6:
         // Same logic as in sha_absy, but we intercept the 6th cycle.
 
@@ -1288,6 +1275,10 @@ shx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 4:
         absi_write(cpu, bus, cycle, cpu.Y, 0)
+
+        if cycle == 4 {
+            cpu_poll_interrupts(cpu, bus)
+        }
     case 5:
         // Same logic as in sha_absy, but the corruption takes the form of X and not A & X.
 
@@ -1307,6 +1298,10 @@ shy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 4:
         absi_write(cpu, bus, cycle, cpu.X, 0)
+
+        if cycle == 4 {
+            cpu_poll_interrupts(cpu, bus)
+        }
     case 5:
         // Same logic as in sha_absy, but the corruption takes the form of Y and not A & X.
 
@@ -1392,6 +1387,10 @@ tas :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
     case 2 ..= 4:
         absi_write(cpu, bus, cycle, cpu.Y, 0)
+
+        if cycle == 4 {
+            cpu_poll_interrupts(cpu, bus)
+        }
     case 5:
         // Puts A AND X in SP and stores A AND X AND (high-byte of addr. + 1) at addr.
         // Same logic as in sha_absy, but with an additional action.

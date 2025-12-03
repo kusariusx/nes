@@ -58,9 +58,4 @@ apu_tick :: proc(a: ^APU, cpu_bus: ^NES_CPU_Bus) {
             a.status |= 1 << 6
         }
     }
-
-    frame_interrupt := (a.status >> 6) & 1
-    if frame_interrupt == 1 { // Frame interrupt flag s connected to CPU's IRQ line
-        cpu_bus.irq_pending = true
-    }
 }

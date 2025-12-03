@@ -144,13 +144,7 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
 
     switch reg {
     case 0: // PPUCTRL
-        orig_nmi_enabled := p.PPUCTRL.V
         p.PPUCTRL = PPUCTRL_Bits(value)
-
-        // If VBlank NMI was enabled during VBlank - request NMI immediately
-        if orig_nmi_enabled == 0 && p.PPUCTRL.V == 1 && p.PPUSTATUS.V == 1 {
-            b.cpu_bus.nmi_pending = true
-        }
 
         // Update bits 10 and 11 of PPU's internal t register
         p.t = (p.t & 0xF3FF) | (u16(p.PPUCTRL.NN) << 10)
@@ -211,13 +205,11 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
         is_pre_render_scanline := p.scanline == 261
         is_visible_scanline := !is_pre_render_scanline
 
-        if is_pre_render_scanline {
+        if is_pre_render_scanline && p.scanline_cycle == 1 {
             // The three PPUSTATUS flags are automatically cleared on dot 1 of the pre-render scanline
-            if p.scanline_cycle == 1 {
-                p.PPUSTATUS.V = 0
-                p.PPUSTATUS.S = 0
-                p.PPUSTATUS.O = 0
-            }
+            p.PPUSTATUS.V = 0
+            p.PPUSTATUS.S = 0
+            p.PPUSTATUS.O = 0
         }
 
         if is_rendering_enabled {
@@ -515,11 +507,6 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
         if p.scanline == 241 && p.scanline_cycle == 1 {
             // Set VBlank flag on the second cycle of 241st scanline
             p.PPUSTATUS.V = 1
-
-            // Request NMI if enabled
-            if p.PPUCTRL.V == 1 {
-                b.cpu_bus.nmi_pending = true
-            }
         }
     }
 
