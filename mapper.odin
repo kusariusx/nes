@@ -2,11 +2,13 @@ package main
 
 import "core:mem"
 
-Mapper_Initialization_Error :: union #shared_nil {
+Mapper_Not_Supported :: struct {
+    mapper_number: u8,
+}
+
+Mapper_Initialization_Error :: union {
     mem.Allocator_Error,
-    enum {
-        MAPPER_NOT_SUPPORTED = 1,
-    }
+    Mapper_Not_Supported,
 }
 
 Mapper :: union {
@@ -54,15 +56,26 @@ mapper_number :: proc(rom: ^ROM) -> u8 {
     return (rom.header.flags_7.mapper_high_nibble << 4) | rom.header.flags_6.mapper_low_nibble
 }
 
-mapper_init :: proc(rom: ^ROM) -> (Mapper, Mapper_Initialization_Error) {
+mapper_init :: proc(rom: ^ROM) -> (mapper: Mapper, err: Mapper_Initialization_Error) {
 	mapper_number := mapper_number(rom)
+
+    err_alloc: mem.Allocator_Error
 
 	switch mapper_number {
 	case 0:
-		return new(NROM)
+		mapper, err_alloc = new(NROM)
+    case: 
+        err = Mapper_Not_Supported{mapper_number}
 	}
 
-	return nil, .MAPPER_NOT_SUPPORTED
+    // Since Mapper_Initialization_Error is not #shared_nil (to be able to return structs as error variants), 
+    // we need to manully check allocator error for nil in order to avoid returning Allocator_Error.None as 
+    // a legitimate error.
+    if err_alloc != nil {
+        return nil, err_alloc
+    }
+
+	return
 }
 
 mapper_free :: proc(mapper: Mapper) {
