@@ -62,7 +62,7 @@ Parsing_Errors :: enum {
     Invalid_Header,
 }
 
-Parsing_Error :: union {
+Parsing_Error :: union #shared_nil {
     mem.Allocator_Error,
     Parsing_Errors,
 }
