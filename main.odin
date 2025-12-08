@@ -26,69 +26,35 @@ main :: proc() {
 	}
 	defer delete(rom_data)
 
-	rom, err_parsing := rom_parse(rom_data)
-	if err_parsing != nil {
-		fmt.eprintfln("unable to parse ROM: %v", err_read)
-		return
-	}
-	defer rom_free(rom)
-
-	mapper, err_mapper := mapper_init(rom)
-	if err_mapper != nil {
-		if err_mapper == .MAPPER_NOT_SUPPORTED {
-			fmt.eprintfln("mapper %d is not supported", mapper_number(rom))
-		} else {
-			fmt.eprintfln("unable to initialize mapper: %v", err_mapper)
+	nes, err_init := nes_init(rom_data)
+	if err_init != nil {
+		if err_mapper, ok := err_init.(Mapper_Initialization_Error); ok {
+			if err_mapper_not_supported, ok := err_mapper.(Mapper_Not_Supported); ok {
+				fmt.eprintfln("mapper %d is not supported", err_mapper_not_supported.mapper_number)
+				return
+			}
 		}
 
+		fmt.eprintf("unable to init NES: %v", err_init)
 		return
 	}
-	defer mapper_free(mapper)
+	defer nes_free(nes)
 
-	ppu := PPU{}
-	apu := APU{}
-	
-	ppu_bus := NES_PPU_Bus{
-		mapper = mapper,
-		rom = rom,
-	}
-
-	cpu_bus := NES_CPU_Bus{
-		mapper = mapper,
-		ppu = &ppu,
-		ppu_bus = &ppu_bus,
-		rom = rom,
-		apu = &apu,
-	}
-
-	ppu_bus.cpu_bus = &cpu_bus
-
-	cpu := CPU{}
-	cpu_reset(&cpu, &cpu_bus)
+	nes_reset(nes)
 
 	ui := ui_init()
 	defer ui_free(&ui)
 
 	for ui_poll_event() {
 		frame_start := time.tick_now()
-		is_odd_frame := ppu.is_odd_frame
+		is_odd_frame := nes.ppu.is_odd_frame
 
 		// Emulate 1 frame
-		for ppu.is_odd_frame == is_odd_frame {
-			cpu_tick(&cpu, &cpu_bus)
-
-			// 3 PPU cycles for every CPU cycle
-			ppu_tick(&ppu, &ppu_bus)
-			ppu_tick(&ppu, &ppu_bus)
-			ppu_tick(&ppu, &ppu_bus)
-
-			// Tick APU every other CPU cycle
-			if cpu.is_read_cycle {
-				apu_tick(&apu, &cpu_bus)
-			}
+		for nes.ppu.is_odd_frame == is_odd_frame {
+			nes_tick(nes)
 		}
 		
-		ui_update_texture(&ui, ppu.framebuffer[:])
+		ui_update_texture(&ui, nes.ppu.framebuffer[:])
 		ui_render(&ui)
 		
 		// Limit to 60 FPS
