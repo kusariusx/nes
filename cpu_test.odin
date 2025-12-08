@@ -123,35 +123,18 @@ test_instructions_nestest :: proc(t: ^testing.T) {
     testing.expect_value(t, ok, true)
     defer delete(rom_data)
 
-    rom, err := rom_parse(rom_data)
+    nes, err := nes_init(rom_data)
     testing.expect_value(t, err, nil)
-    defer rom_free(rom)
+    defer nes_free(nes)
 
-    mapper := NROM{}
-    apu := APU{}
-
-    bus := NES_CPU_Bus{
-        rom = rom,
-        mapper = &mapper,
-        apu = &apu,
-    }
-
-    cpu := CPU{}
-    cpu_reset(&cpu, &bus)
-    cpu.PC = 0xC000 // Custom PC for this test ROM
-
-    buffer: [1]byte
+    nes_reset(nes)
+    nes.cpu.PC = 0xC000 // Custom PC for this test ROM
 
     loc02, loc03: u8
-    instrs := 0
-    for cpu.PC < 0xFFFF && loc02 == 0 && loc03 == 0 && !cpu.halt {
-        cpu_tick(&cpu, &bus)
-        for cpu.instruction != nil {
-            cpu_tick(&cpu, &bus)
-        }
+    for loc02 == 0 && loc03 == 0 && !nes.cpu.halt {
+        cpu_tick(nes.cpu, nes.cpu_bus)
 
-        loc02, loc03 = cpu_bus_read(&bus, 0x02), cpu_bus_read(&bus, 0x03)
-        instrs += 1
+        loc02, loc03 = cpu_bus_read(nes.cpu_bus, 0x02), cpu_bus_read(nes.cpu_bus, 0x03)
     }
 
     testing.expect_value(t, loc02, 0)
@@ -171,48 +154,28 @@ test_instructions_blargg :: proc(t: ^testing.T) {
         testing.expect_value(t, ok, true)
         defer delete(rom_data)
 
-        rom, err := rom_parse(rom_data)
+        nes, err := nes_init(rom_data)
         testing.expect_value(t, err, nil)
-        defer rom_free(rom)
+        defer nes_free(nes)
 
-        mapper := NROM{}
-        apu := APU{}
-
-        cpu_bus := NES_CPU_Bus{
-            rom = rom,
-            mapper = &mapper,
-            apu = &apu,
-        }
-
-        cpu := CPU{}
-        cpu_reset(&cpu, &cpu_bus)
-
-        ppu := PPU{}
-        ppu_bus := NES_PPU_Bus{
-            cpu_bus = &cpu_bus,
-            rom = rom,
-            mapper = &mapper,
-        }
-
-        cpu_bus.ppu = &ppu
-        cpu_bus.ppu_bus = &ppu_bus
+        nes_reset(nes)
 
         test_result_loc :: 0x6000
 
-        cpu_bus_write(&cpu_bus, test_result_loc, 0x80) // Test is running
-        for cpu_bus_read(&cpu_bus, test_result_loc) == 0x80  {
-            cpu_tick(&cpu, &cpu_bus) 
+        cpu_bus_write(nes.cpu_bus, test_result_loc, 0x80) // Test is running
+        for cpu_bus_read(nes.cpu_bus, test_result_loc) == 0x80  {
+            cpu_tick(nes.cpu, nes.cpu_bus)
         }
 
         test_ok := true
 
         // Validate signature indicating that the test result is valid
-        test_ok &&= testing.expect_value(t, cpu_bus_read(&cpu_bus, 0x6001), 0xDE)
-        test_ok &&= testing.expect_value(t, cpu_bus_read(&cpu_bus, 0x6002), 0xB0)
-        test_ok &&= testing.expect_value(t, cpu_bus_read(&cpu_bus, 0x6003), 0x61)
+        test_ok &&= testing.expect_value(t, cpu_bus_read(nes.cpu_bus, 0x6001), 0xDE)
+        test_ok &&= testing.expect_value(t, cpu_bus_read(nes.cpu_bus, 0x6002), 0xB0)
+        test_ok &&= testing.expect_value(t, cpu_bus_read(nes.cpu_bus, 0x6003), 0x61)
 
         // Validate the test result - value 0 means the test passed
-        test_ok &&= testing.expect_value(t, cpu_bus_read(&cpu_bus, test_result_loc), 0)
+        test_ok &&= testing.expect_value(t, cpu_bus_read(nes.cpu_bus, test_result_loc), 0)
 
         if !test_ok {
             log.fatalf("test %s has failed", info.name)
