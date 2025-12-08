@@ -30,7 +30,7 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
     }
 }
 
-apu_tick :: proc(a: ^APU, cpu_bus: ^NES_CPU_Bus) {
+apu_tick :: proc(a: ^APU) {
     frame_counter_mode := a.frame_counter_flags >> 7
     frame_counter_interrupt_inhibit := (a.frame_counter_flags >> 6) & 1
 
