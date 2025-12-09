@@ -13,6 +13,8 @@ NES :: struct {
 
     rom: ^ROM,
     mapper: Mapper,
+
+    io: ^IO,
 }
 
 NES_Init_Error :: union #shared_nil {
@@ -37,6 +39,8 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
 	ppu_bus := new(NES_PPU_Bus) or_return
     cpu_bus := new(NES_CPU_Bus) or_return
 
+    io := new(IO) or_return
+
 	ppu_bus.cpu_bus = cpu_bus
     ppu_bus.rom = rom
     ppu_bus.mapper = mapper
@@ -46,6 +50,7 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
     cpu_bus.apu = apu
     cpu_bus.rom = rom
     cpu_bus.mapper = mapper
+    cpu_bus.io = io
 
     return new_clone(NES{
         rom = rom,
@@ -55,6 +60,7 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
         cpu = cpu,
         ppu_bus = ppu_bus,
         cpu_bus = cpu_bus,
+        io = io,
     })
 }
 
@@ -74,7 +80,13 @@ nes_free :: proc(nes: ^NES) {
     free(nes.ppu_bus)
     free(nes.cpu_bus)
 
+    free(nes.io)
+
     free(nes)
+}
+
+nes_attach_peripheral :: proc(nes: ^NES, p: Peripheral, port: IO_Port) {
+    nes.io.ports[port] = p
 }
 
 // Resets the state of the hardware but leaves ROM and mapper in place

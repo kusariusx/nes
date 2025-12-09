@@ -11,6 +11,8 @@ NES_CPU_Bus :: struct {
     rom: ^ROM,
     mapper: Mapper,
 
+    io: ^IO,
+
     oam_dma_pending: bool,
     oam_dma_active: bool,
     oam_dma_address: u16,
@@ -57,6 +59,10 @@ nes_cpu_bus_resolve_read :: proc(b: ^NES_CPU_Bus, address: u16) -> (value: u8, h
         effective_address := u8(address & 0x7) // Mask to 3 bits (8 registers)
         return ppu_read_register(b.ppu, b.ppu_bus, effective_address), true
     case 0x4000 ..= 0x4017: // APU and IO registers
+        if address == 0x4016 || address == 0x4017 { // IO registers
+            return io_read_register(b.io, address)
+        }
+
         return apu_read_register(b.apu, address)
     case 0x4018 ..= 0x401F: // Additional APU and IO functionality which is normally disabled
     case 0x4020 ..= 0xFFFF: // Unmapped - cartridges are free to map this area to anything 
@@ -79,9 +85,11 @@ nes_cpu_bus_resolve_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
         case 0x4014: // OAMDMA
             b.oam_dma_pending = true
             b.oam_dma_address = u16(value) << 8
+        case 0x4016: // IO
+            io_write_register(b.io, address, value)
+        case:
+            apu_write_register(b.apu, address, value)
         }
-
-        apu_write_register(b.apu, address, value)
     case 0x4018 ..= 0x401F: // Additional APU and IO functionality which is normally disabled
     case 0x4020 ..= 0xFFFF: // Unmapped - cartridges are free to map this area to anything 
     }

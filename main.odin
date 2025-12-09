@@ -5,10 +5,12 @@ import "core:mem"
 import "core:os"
 import "core:time"
 
+import sdl "vendor:sdl2"
+
 TARGET_FPS :: 60.0
 FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
 
-ROM_PATH :: "test/cpu/cpu-interrupts/3-nmi_and_irq.nes"
+ROM_PATH :: "games/Super_mario_brothers.nes"
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -42,10 +44,32 @@ main :: proc() {
 
 	nes_reset(nes)
 
-	ui := ui_init()
+	// For now, hardcode the standard controller
+	nes_controller := NES_Standard_Controller{}
+	nes_attach_peripheral(nes, &nes_controller, IO_Port.Port_1)
+	
+	nes_controller_mapping := make(map[sdl.Keycode]Peripheral_Action_Proc)
+	nes_controller_mapping[sdl.Keycode.A] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .A, key_state) }
+	nes_controller_mapping[sdl.Keycode.S] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .B, key_state) }
+	nes_controller_mapping[sdl.Keycode.Z] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Select, key_state) }
+	nes_controller_mapping[sdl.Keycode.X] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Start, key_state) }
+	nes_controller_mapping[sdl.Keycode.UP] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Up, key_state) }
+	nes_controller_mapping[sdl.Keycode.DOWN] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Down, key_state) }
+	nes_controller_mapping[sdl.Keycode.LEFT] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Left, key_state) }
+	nes_controller_mapping[sdl.Keycode.RIGHT] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Right, key_state) }
+	defer delete(nes_controller_mapping)
+
+	ui_controllers := [1]UI_Controller{
+		{
+			peripheral = &nes_controller,
+			mapping = nes_controller_mapping,
+		}
+	}
+
+	ui := ui_init(ui_controllers[:])
 	defer ui_free(&ui)
 
-	for ui_poll_event() {
+	for ui_poll_event(&ui) {
 		frame_start := time.tick_now()
 		is_odd_frame := nes.ppu.is_odd_frame
 
