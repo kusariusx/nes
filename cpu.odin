@@ -39,10 +39,14 @@ CPU :: struct {
 
 	halt: bool,
 
-	nmi_line_prev: bool,
+	nmi_line_prev: bool, // For NMI edge detection
 
-	nmi_detected: bool, 
-	irq_detected: bool,
+	// Flip-flops indicating that interrupt conditions have been met
+	nmi_latch: bool,
+	irq_latch: bool, 
+
+	// NMI flip-flop is polled at discrete intervals (not continuously) - we handle NMI only when flip-flop is active during polling
+	nmi_pending: bool,
 
 	interrupt_vector: u16,
 
@@ -66,22 +70,6 @@ CPU :: struct {
 Instruction :: struct {
 	mnemonic: string, // For disassembly/debug
 	handler:  proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8),
-}
-
-// Interrupts are usually polled on the second-to-last cycle of an instruction.
-cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
-	b, ok := b.(^NES_CPU_Bus)
-	if !ok {
-		return // No-op for test bus
-	}
-
-	// IRQs can have various sources - they are all connected to the same IRQ line, being effectively OR'ed.
-	// IRQ line will stay low/active until all interrupt sources acknowledge their interrupt.
-	c.irq_detected = 
-		(b.apu.status >> 6) & 1 == 1 // APU Frame Counter
-
-	// I flag is a master control for IRQ generation
-	c.irq_detected &&= c.P.I == 0
 }
 
 cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
@@ -126,6 +114,8 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		return
 	}
 
+	cpu_detect_nmi(cpu, bus)
+
 	if cpu.instruction == nil { // We start executing a new instruction
 		// This is the first cycle of any instruction
 		// Start with 1 for better alignment with the documentation
@@ -137,15 +127,19 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 
 		// Check for interrupts
 		// Note: when handling interrupts, writes to PC are suppressed, hence not incrementing it
-		if cpu.nmi_detected {
-			cpu.nmi_detected = false // Acknowledge NMI
-			cpu.irq_detected = false // Forget about IRQ
+		if cpu.nmi_pending {
+			// Acknowledge NMI
+			cpu.nmi_latch = false
+			cpu.nmi_pending = false 
+
+			// Forget about IRQ
+			cpu.irq_latch = false
 
 			cpu.interrupt_vector = NMI_Vector
 			cpu.instruction = &Interrupt_Handler
-		} else if cpu.irq_detected {
-			// We do not acknowledge IRQs - software is responsible for this
-			cpu.irq_detected = false 
+		} else if cpu.irq_latch && cpu.P.I == 0 {
+			cpu.irq_latch = false
+			
 			cpu.interrupt_vector = IRQ_Vector
 			cpu.instruction = &Interrupt_Handler
 		} else {
@@ -163,14 +157,34 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
 
 	cpu.instruction_cycle += 1
+}
 
-	// NMI edge detection at the end of each cycle
+cpu_detect_nmi :: proc(c: ^CPU, b: ^NES_CPU_Bus) {
+	// NMI edge detection
 	// PPUSTATUS.V and PPUCTRL.V and AND'ed together and fed to CPU's NMI line
-	nmi_line := bus.ppu.PPUSTATUS.V == 1 && bus.ppu.PPUCTRL.V == 1
-	if !cpu.nmi_line_prev && nmi_line {
-		cpu.nmi_detected = true
+	nmi_line := b.ppu.PPUSTATUS.V == 1 && b.ppu.PPUCTRL.V == 1
+	if !c.nmi_line_prev && nmi_line {
+		c.nmi_latch = true
 	}
-	cpu.nmi_line_prev = nmi_line
+	
+	c.nmi_line_prev = nmi_line
+}
+
+// Interrupts are usually polled on the second-to-last cycle of an instruction.
+cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
+	b, ok := b.(^NES_CPU_Bus)
+	if !ok {
+		return // No-op for test bus
+	}
+
+	if c.nmi_latch {
+		c.nmi_pending = true
+	}
+
+	// IRQs can have various sources - they are all connected to the same IRQ line, being effectively OR'ed.
+	// IRQ line will stay low/active until all interrupt sources acknowledge their interrupt.
+	c.irq_latch = 
+		(b.apu.status >> 6) & 1 == 1 // APU Frame Counter
 }
 
 cpu_tick_test_bus :: proc(cpu: ^CPU, bus: ^Test_CPU_Bus) {
@@ -210,10 +224,10 @@ cpu_reset :: proc(cpu: ^CPU, bus: CPU_Bus) {
 	cpu.PCL = cpu_bus_read(bus, 0xFFFC)
 	cpu.PCH = cpu_bus_read(bus, 0xFFFD)
 
-	cpu.nmi_detected = false
-	cpu.irq_detected = false
-
+	cpu.nmi_pending = false
+	cpu.nmi_latch = false
 	cpu.nmi_line_prev = false
+	cpu.irq_latch = false
 
 	cpu.is_read_cycle = false
 }
@@ -244,21 +258,23 @@ interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, is_brk: b
 	case 4:
 		// Push PCL on the stack
 		stack_push(cpu, bus, cpu.PCL)
+
+		// Detect interrupt hijacking
+		if cpu.nmi_latch {
+			cpu.nmi_latch = false // Acknowledge the hijacking NMI
+			cpu.irq_latch = false // IRQ forgotten when NMI wins
+
+			cpu.interrupt_vector = NMI_Vector
+		} else if is_brk {
+			// BRK uses IRQ vector if not hijacked
+			cpu.interrupt_vector = IRQ_Vector
+		}
 	case 5:
 		// Push P on the stack (with B flag clear)
 		p := cpu.P
 		p.B = is_brk ? 1 : 0
 
 		stack_push(cpu, bus, byte(p))
-
-		if cpu.nmi_detected {
-			cpu.nmi_detected = false  // Acknowledge the hijacking NMI
-			cpu.irq_detected = false  // IRQ forgotten when NMI wins
-			cpu.interrupt_vector = NMI_Vector
-		} else if is_brk {
-			// BRK uses IRQ vector if not hijacked (BRK doesn't set vector at fetch)
-			cpu.interrupt_vector = IRQ_Vector
-		}
 	case 6:
 		// Fetch PCL, set I flag
 		cpu.PCL = cpu_bus_read(bus, cpu.interrupt_vector)
