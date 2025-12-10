@@ -24,14 +24,6 @@ NES_Init_Error :: union #shared_nil {
 }
 
 nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
-    rom := rom_parse(rom_data) or_return
-
-    mapper, err_mapper := mapper_init(rom)
-    if err_mapper != nil {
-        rom_free(rom)
-        return nil, err_mapper
-    }
-
     ppu := new(PPU) or_return
 	apu := new(APU) or_return
     cpu := new(CPU) or_return
@@ -40,6 +32,14 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
     cpu_bus := new(NES_CPU_Bus) or_return
 
     io := new(IO) or_return
+
+    rom := rom_parse(rom_data) or_return
+
+    mapper, err_mapper := mapper_init(rom, ppu_bus.vram[:])
+    if err_mapper != nil {
+        rom_free(rom)
+        return nil, err_mapper
+    }
 
 	ppu_bus.cpu_bus = cpu_bus
     ppu_bus.rom = rom

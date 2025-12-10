@@ -25,9 +25,9 @@ INES_Header_Data :: struct {
 ROM_Header :: struct { // First 16-bytes of the ROM
     nes_constant: []byte, // Constant $4E $45 $53 $1A (ASCII "NES" followed by MS-DOS end-of-file)
     prg_rom_banks: byte,
-    chr_rom_banks: byte, // Can be 0
+    chr_rom_banks: byte, // Can be 0 - in this case CHR-RAM is used
     flags_6: bit_field byte {
-        nametable_arrangement: byte | 1,
+        nametable_arrangement: byte | 1, // 0 - vertical arrangement; 1 - horizontal arrangement
         battery_backed_memory: byte | 1,
         trainer: byte | 1,
         alternative_nametable_layout: byte | 1,
