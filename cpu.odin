@@ -22,8 +22,9 @@ CPU_Flags :: bit_field byte {
 	N:      byte | 1, // Negative
 }
 
-NMI_Vector :: 0xFFFA
-IRQ_Vector :: 0xFFFE
+NMI_Vector   :: 0xFFFA
+Reset_Vector :: 0xFFFC
+IRQ_Vector   :: 0xFFFE
 
 CPU :: struct {
 	instruction:            ^Instruction, // Current running instruction
@@ -220,9 +221,8 @@ cpu_reset :: proc(cpu: ^CPU, bus: CPU_Bus) {
 	cpu.P.C, cpu.P.Z, cpu.P.D, cpu.P.V, cpu.P.N = 0, 0, 0, 0, 0
 	cpu.P.I, cpu.P.unused = 1, 1
 
-	// Set PC to reset vector
-	cpu.PCL = cpu_bus_read(bus, 0xFFFC)
-	cpu.PCH = cpu_bus_read(bus, 0xFFFD)
+	cpu.PCL = cpu_bus_read(bus, Reset_Vector)
+	cpu.PCH = cpu_bus_read(bus, Reset_Vector + 1)
 
 	cpu.nmi_pending = false
 	cpu.nmi_latch = false
