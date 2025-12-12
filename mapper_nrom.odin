@@ -9,12 +9,12 @@ nrom_cpu_read :: proc(m: ^NROM, r: ^ROM, address: u16) -> (value: u8, read_handl
     switch address {
     case 0x6000 ..= 0x7FFF: // PRG-RAM
         if r.header.prg_ram_size > 0 {
-            effective_address := (address - 0x6000) % r.header.prg_ram_size
+            effective_address := int(address - 0x6000) % r.header.prg_ram_size
             return m.prg_ram[effective_address], true
         }
     case 0x8000 ..= 0xFFFF: // PRG-ROM
-        prg_rom_size := u16(r.header.prg_rom_banks) * PRG_ROM_BANK_SIZE
-        effective_address := (address - 0x8000) % prg_rom_size // Modulo actual size to implement mirroring
+        prg_rom_size := int(r.header.prg_rom_banks) * PRG_ROM_BANK_SIZE
+        effective_address := int(address - 0x8000) % prg_rom_size // Modulo actual size to implement mirroring
         return r.prg_rom[effective_address], true
     }
 
@@ -28,7 +28,7 @@ nrom_cpu_write :: proc(m: ^NROM, r: ^ROM, address: u16, value: u8) -> (write_han
             // if address > 0x6004 {
             //     fmt.printf("%c", value)
             // }
-            effective_address := (address - 0x6000) % r.header.prg_ram_size
+            effective_address := int(address - 0x6000) % r.header.prg_ram_size
             m.prg_ram[effective_address] = value
             
             return true
