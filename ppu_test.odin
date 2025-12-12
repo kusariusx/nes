@@ -120,6 +120,10 @@ test_fetch_nametable_byte :: proc(t: ^testing.T) {
     ppu: PPU
     bus: NES_PPU_Bus
 
+    // We interact with VRAM through PPU bus, which means we have to specify nametable arangement
+    rom := ROM{header = {flags_6 = { nametable_arrangement = 1 }}}
+    bus.rom = &rom
+
     // Initialize bus VRAM with test data
     bus.vram[0x000] = 0x42 // Address 0x2000
     bus.vram[0x3FF] = 0x99 // Address 0x23FF
@@ -144,6 +148,9 @@ test_fetch_nametable_byte :: proc(t: ^testing.T) {
 test_fetch_attribute_byte :: proc(t: ^testing.T) {
     ppu: PPU
     bus: NES_PPU_Bus
+
+    rom := ROM{header = {flags_6 = { nametable_arrangement = 0 }}}
+    bus.rom = &rom
 
     // Set up attribute byte: 0b11_10_01_00
     // Bits 1-0: 00 (top-left)
