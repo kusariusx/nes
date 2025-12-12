@@ -15,6 +15,8 @@ NES :: struct {
     mapper: Mapper,
 
     io: ^IO,
+
+    breakpoint: bool,
 }
 
 NES_Init_Error :: union #shared_nil {
@@ -92,8 +94,11 @@ nes_attach_peripheral :: proc(nes: ^NES, p: Peripheral, port: IO_Port) {
 // Resets the state of the hardware but leaves ROM and mapper in place
 nes_reset :: proc(nes: ^NES) {
     cpu_reset(nes.cpu, nes.cpu_bus)
+
+    nes.breakpoint = false
 }
 
+// Generally equivalent to 1 CPU cycle
 nes_tick :: proc(nes: ^NES) {
     // 3 PPU cycles for every CPU cycle
     ppu_tick(nes.ppu, nes.ppu_bus)
@@ -108,31 +113,22 @@ nes_tick :: proc(nes: ^NES) {
     cpu_tick(nes.cpu, nes.cpu_bus)
 }
 
-nes_print_state :: proc(nes: ^NES) {
-    cpu := nes.cpu
-    mnemonic := "??"
-    if cpu.instruction != nil {
-        mnemonic = cpu.instruction.mnemonic
+// Ticks the system enough to run one full CPU instruction
+nes_debug_run_cpu_instruction :: proc(nes: ^NES) {
+    // Finish with the current instruction in case this function was called mid-instruction
+    for nes.cpu.instruction != nil {
+        nes_tick(nes)
     }
 
-    fmt.printfln("%04X: %s", u16(cpu.PC), mnemonic)
-    fmt.printfln(
-        "A=%02X X=%02X Y=%02X S=%02X P=%02X",
-        cpu.A,
-        cpu.X,
-        cpu.Y,
-        cpu.S,
-        byte(cpu.P),
-    )
+    nes_tick(nes) // Run for 1 cycle to decode instruction
 
-    fmt.printfln(
-        "N=%d V=%d B=%d D=%d I=%d Z=%d C=%d\n",
-        cpu.P.N,
-        cpu.P.V,
-        cpu.P.B,
-        cpu.P.D,
-        cpu.P.I,
-        cpu.P.Z,
-        cpu.P.C,
-    )
+    // Print CPU state before the instruction is executed
+    fmt.println("------------------ CPU STATE ------------------")
+    fmt.printfln("P = %02X (%08b) | PC = %04X (%s)", byte(nes.cpu.P), byte(nes.cpu.P), nes.cpu.PC - 1, nes.cpu.instruction.mnemonic)
+    fmt.printfln("A = %02X | X = %02X | Y = %02X | S = %02X", nes.cpu.A, nes.cpu.X, nes.cpu.Y, nes.cpu.S)
+    fmt.println("-----------------------------------------------")
+
+    for nes.cpu.instruction != nil { // Execture the rest of the instruction
+        nes_tick(nes)
+    }
 }
