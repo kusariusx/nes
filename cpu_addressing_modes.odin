@@ -95,7 +95,7 @@ absi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action
         cpu.instruction_operands.bytes[LOW] += index_register
         cpu.PC += 1
 
-        // Poll for interrupts of page boundary was not crossed
+        // Poll for interrupts if page boundary was not crossed
         if cpu.instruction_operands.bytes[LOW] >= index_register {
             cpu_poll_interrupts(cpu, bus)
         }
