@@ -22,22 +22,29 @@ NES_PALETTE := [64]u32{
     0xE4E594, 0xCFEF96, 0xBDF4AB, 0xB3F3CC, 0xB5EBF2, 0xB8B8B8, 0x000000, 0x000000,
 }
 
-Peripheral_Action_Proc :: proc(p: Peripheral, key_state: Button_State)
-
-UI_Controller :: struct {
-    peripheral: Peripheral,
-    mapping: map[sdl.Keycode]Peripheral_Action_Proc, // We map key presses to actions on the peripheral
+UI_Key_State :: enum {
+    Down,
+    Up,
 }
 
+// We map key presses/releases to actions on peripherals
+Peripheral_Mappings :: map[sdl.Keycode][UI_Key_State]Peripheral_Update
+
+// Mappings that can control the entire NES
+NES_Mappings :: map[sdl.Keycode][UI_Key_State]proc(nes: ^NES)
+
 UI :: struct {
-    window: ^sdl.Window, 
+    window: ^sdl.Window,
     renderer: ^sdl.Renderer,
     texture: ^sdl.Texture,
 
-    controllers: []UI_Controller,
+    // UI is able to control the entire system
+    nes: ^NES,
+    nes_mappings: NES_Mappings,
+    peripheral_mappings: Peripheral_Mappings,
 }
 
-ui_init :: proc(controllers: []UI_Controller) -> UI {
+ui_init :: proc(nes: ^NES, nes_mappings: NES_Mappings, peripheral_mappings: Peripheral_Mappings) -> UI {
     window_flags := sdl.WindowFlags{sdl.WindowFlag.OPENGL}
 	window := sdl.CreateWindow(
 		"NES",
@@ -73,7 +80,9 @@ ui_init :: proc(controllers: []UI_Controller) -> UI {
         window = window,
         renderer = renderer,
         texture = texture,
-        controllers = controllers,
+        nes = nes,
+        nes_mappings = nes_mappings,
+        peripheral_mappings = peripheral_mappings,
     }
 }
 
@@ -121,13 +130,16 @@ ui_poll_event :: proc(ui: ^UI) -> bool {
                 return false // Quit the app
             }
 
-            key_state := event.type == sdl.EventType.KEYDOWN ? Button_State.Pressed : Button_State.Released
+            key_state := event.type == sdl.EventType.KEYDOWN ? UI_Key_State.Down : UI_Key_State.Up
 
-            for c in ui.controllers {
-                action, ok := c.mapping[event.key.keysym.sym]
-                if ok {
-                    action(c.peripheral, key_state)
-                }
+            pm, ok_pm := ui.peripheral_mappings[event.key.keysym.sym]
+            if ok_pm && pm[key_state] != nil {
+                peripheral_update(pm[key_state])
+            }
+
+            nm, ok_nm := ui.nes_mappings[event.key.keysym.sym]
+            if ok_nm && nm[key_state] != nil {
+                nm[key_state](ui.nes)
             }
 		}
 	}

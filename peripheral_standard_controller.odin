@@ -22,6 +22,12 @@ NES_Standard_Controller :: struct {
     shift_register: u8, // This holds latched button states, shifts after every read
 }
 
+NES_Standard_Controller_Update :: struct {
+    controller: ^NES_Standard_Controller,
+    button: NES_Standard_Controller_Button,
+    state: Button_State,
+}
+
 nes_standard_controller_read :: proc(c: ^NES_Standard_Controller) -> u8 {
     if c.strobe { // Reload shift register
         c.shift_register = c.button_states
@@ -44,9 +50,10 @@ nes_standard_controller_write :: proc(c: ^NES_Standard_Controller, value: u8) {
     }
 }
 
-nes_standard_controller_update_button :: proc(c: ^NES_Standard_Controller, b: NES_Standard_Controller_Button, s: Button_State) {
-    target_bit := u8(1) << u8(b)
-    target_state := u8(s) << u8(b)
+nes_standard_controller_update :: proc(u: NES_Standard_Controller_Update) {
+    target_bit := u8(1) << u8(u.button)
+    target_state := u8(u.state) << u8(u.button)
 
-    c.button_states = (c.button_states & ~target_bit) | target_state // Set corresponding bit
+    // Set corresponding bit
+    u.controller.button_states = (u.controller.button_states & ~target_bit) | target_state
 }

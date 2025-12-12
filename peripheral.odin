@@ -2,7 +2,11 @@ package main
 
 Peripheral :: union {
     ^NES_Standard_Controller,
-} 
+}
+
+Peripheral_Update :: union {
+    NES_Standard_Controller_Update,
+}
 
 peripheral_read :: proc(peripheral: Peripheral) -> u8 {
     switch p in peripheral {
@@ -17,5 +21,12 @@ peripheral_write :: proc(peripheral: Peripheral, value: u8) {
     switch p in peripheral {
     case ^NES_Standard_Controller:
         nes_standard_controller_write(p, value)
+    }
+}
+
+peripheral_update :: proc(update: Peripheral_Update) {
+    switch u in update {
+    case NES_Standard_Controller_Update:
+        nes_standard_controller_update(u)
     }
 }
