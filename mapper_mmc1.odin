@@ -20,7 +20,7 @@ mmc1_cpu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
     case 0x6000 ..= 0x7FFF: // Optional PRG-RAM
         prg_ram_enabled := (m.prg_bank >> 4) & 1 == 0
         if prg_ram_enabled && r.header.prg_ram_size > 0 {
-            effective_address := (address - 0x6000) % r.header.prg_ram_size
+            effective_address := int(address - 0x6000) % r.header.prg_ram_size
             return m.prg_ram[effective_address], true
         }
     case 0x8000 ..= 0xBFFF: // 16 KB PRG-ROM bank
@@ -38,7 +38,7 @@ mmc1_cpu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
 
         bank %= r.header.prg_rom_banks
 
-        effective_address := PRG_ROM_BANK_SIZE * u16(bank) + (address - 0x8000)
+        effective_address := PRG_ROM_BANK_SIZE * int(bank) + int(address - 0x8000)
         return r.prg_rom[effective_address], true
     case 0xC000 ..= 0xFFFF: // 16 KB PRG-ROM bank
         bank: u8
@@ -55,7 +55,7 @@ mmc1_cpu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
 
         bank %= r.header.prg_rom_banks
 
-        effective_address := PRG_ROM_BANK_SIZE * u16(bank) + (address - 0xC000)
+        effective_address := PRG_ROM_BANK_SIZE * int(bank) + int(address - 0xC000)
         return r.prg_rom[effective_address], true
     }
 
@@ -67,7 +67,7 @@ mmc1_cpu_write :: proc(m: ^MMC1, r: ^ROM, address: u16, value: u8) -> (write_han
     case 0x6000 ..= 0x7FFF: // Optional PRG-RAM
         prg_ram_enabled := (m.prg_bank >> 4) & 1 == 0
         if prg_ram_enabled && r.header.prg_ram_size > 0 {
-            effective_address := (address - 0x6000) % r.header.prg_ram_size
+            effective_address := int(address - 0x6000) % r.header.prg_ram_size
             m.prg_ram[effective_address] = value
             
             return true
@@ -75,31 +75,31 @@ mmc1_cpu_write :: proc(m: ^MMC1, r: ^ROM, address: u16, value: u8) -> (write_han
     case 0x8000 ..= 0xFFFF: // Load register
         if value >> 7 == 1 {
             // Reset shift register
-            m.shift_register = 1 // Use 1 to keep track when shift register becomes full
-            break
+            m.shift_register = 0b10000 // Use 1 to keep track when shift register becomes full
+            return true
         }
 
-        // Shift bit 0 of the value into the shift register
-        m.shift_register = (m.shift_register << 1) | (value & 1)
-        
-        // Check if full
-        if (m.shift_register >> 5) & 1 == 1 { // We shifted the initial 1 into 6-th position, meaning all 5 bits are loaded
-            value := m.shift_register & 0b11111 // Remove the 1 we use for tracking
+        // We shifted the initial 1 into 0-th position, meaning 4 bits have been loaded 
+        // and we only need to shift one last bit.
+        shift_register_full := m.shift_register & 1 == 1
 
+        m.shift_register = (m.shift_register >> 1) | ((value & 1) << 4)
+
+        if shift_register_full { 
             switch (address >> 13) & 0b11 { // Address bits 13-14 determine which register we write to
             case 0:
-                m.control = value
+                m.control = m.shift_register
             case 1:
-                m.chr_bank_0 = value
+                m.chr_bank_0 = m.shift_register
             case 2:
-                m.chr_bank_1 = value
+                m.chr_bank_1 = m.shift_register
             case 3:
-                m.prg_bank = value
+                m.prg_bank = m.shift_register
             }
 
-            m.shift_register = 1 // Shift register resets automatically after successfull write
+            m.shift_register = 0b10000 // Shift register resets automatically after successfull write
         }
-
+        
         return true
     }
     
@@ -118,7 +118,7 @@ mmc1_ppu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
         total_banks := r.header.chr_rom_banks == 0 ? 2 : r.header.chr_rom_banks * 2
         bank %= total_banks
         
-        effective_address := 0x1000 * u16(bank) + address    
+        effective_address := 0x1000 * int(bank) + int(address)    
         if r.header.chr_rom_banks == 0 {
             return m.chr_ram[effective_address], true
         } else {
@@ -133,7 +133,7 @@ mmc1_ppu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
         total_banks := r.header.chr_rom_banks == 0 ? 2 : r.header.chr_rom_banks * 2
         bank %= total_banks
         
-        effective_address := 0x1000 * u16(bank) + (address - 0x1000)
+        effective_address := 0x1000 * int(bank) + int(address - 0x1000)
         if r.header.chr_rom_banks == 0 {
             return m.chr_ram[effective_address], true
         } else {
@@ -157,7 +157,7 @@ mmc1_ppu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
             bank = nametable >> 1 // 0 -> 0, 1 -> 0, 2 -> 1, 3 -> 1
         }
 
-        effective_address := bank * VRAM_BANK_SIZE + (address & 0x3FF)
+        effective_address := int(bank) * VRAM_BANK_SIZE + int(address & 0x3FF)
         return m.vram[effective_address], true
     }
 
@@ -175,7 +175,7 @@ mmc1_ppu_write :: proc(m: ^MMC1, r: ^ROM, address: u16, value: u8) -> (write_han
             
             bank %= 2
             
-            effective_address := 0x1000 * u16(bank) + address
+            effective_address := 0x1000 * int(bank) + int(address)
             m.chr_ram[effective_address] = value
 
             return true
@@ -189,7 +189,7 @@ mmc1_ppu_write :: proc(m: ^MMC1, r: ^ROM, address: u16, value: u8) -> (write_han
             
             bank %= 2
             
-            effective_address := 0x1000 * u16(bank) + (address - 0x1000)
+            effective_address := 0x1000 * int(bank) + int(address - 0x1000)
             m.chr_ram[effective_address] = value
 
             return true
@@ -211,7 +211,7 @@ mmc1_ppu_write :: proc(m: ^MMC1, r: ^ROM, address: u16, value: u8) -> (write_han
             bank = nametable >> 1
         }
 
-        effective_address := bank * VRAM_BANK_SIZE + (address & 0x3FF)
+        effective_address := int(bank) * VRAM_BANK_SIZE + int(address & 0x3FF)
         m.vram[effective_address] = value
 
         return true
