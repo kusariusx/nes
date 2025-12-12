@@ -74,7 +74,7 @@ mapper_init :: proc(rom: ^ROM, vram: []byte) -> (mapper: Mapper, err: Mapper_Ini
 		mapper, err_alloc = new(NROM)
     case 1:
         mapper, err_alloc = new_clone(MMC1{
-            shift_register = 1,
+            shift_register = 0b10000,
             control = 0x0C,
             vram = vram,
         })
