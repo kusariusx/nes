@@ -10,7 +10,7 @@ import sdl "vendor:sdl2"
 TARGET_FPS :: 60.0
 FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
 
-ROM_PATH :: "games/Super_mario_brothers.nes"
+ROM_PATH :: "games/Legend of Zelda, The (USA) (Rev 1).nes"
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -42,40 +42,51 @@ main :: proc() {
 	}
 	defer nes_free(nes)
 
+	fmt.printfln("successfully loaded ROM with mapper %d", mapper_number(nes.rom))
+
 	nes_reset(nes)
+
+	nes_mappings := make(map[sdl.Keycode][UI_Key_State]proc(nes: ^NES))
+	nes_mappings[.B] = #partial {.Down = proc(nes: ^NES) { 
+		nes.breakpoint = !nes.breakpoint 
+		fmt.printfln("breakpoint %s", nes.breakpoint ? "enabled" : "disabled")
+	}}
+	nes_mappings[.V] = #partial {.Down = proc(nes: ^NES) { 
+		if nes.breakpoint {
+			nes_debug_run_cpu_instruction(nes) 
+		}
+	}}
+	defer delete(nes_mappings)
 
 	// For now, hardcode the standard controller
 	nes_controller := NES_Standard_Controller{}
 	nes_attach_peripheral(nes, &nes_controller, IO_Port.Port_1)
 	
-	nes_controller_mapping := make(map[sdl.Keycode]Peripheral_Action_Proc)
-	nes_controller_mapping[sdl.Keycode.A] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .A, key_state) }
-	nes_controller_mapping[sdl.Keycode.S] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .B, key_state) }
-	nes_controller_mapping[sdl.Keycode.Z] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Select, key_state) }
-	nes_controller_mapping[sdl.Keycode.X] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Start, key_state) }
-	nes_controller_mapping[sdl.Keycode.UP] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Up, key_state) }
-	nes_controller_mapping[sdl.Keycode.DOWN] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Down, key_state) }
-	nes_controller_mapping[sdl.Keycode.LEFT] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Left, key_state) }
-	nes_controller_mapping[sdl.Keycode.RIGHT] = proc(p: Peripheral, key_state: Button_State) { nes_standard_controller_update_button(p.(^NES_Standard_Controller), .Right, key_state) }
-	defer delete(nes_controller_mapping)
+	peripheral_mappings := make(map[sdl.Keycode][UI_Key_State]Peripheral_Update)
+	peripheral_mappings[.A] = {.Down = NES_Standard_Controller_Update{&nes_controller, .A, .Pressed}, .Up = NES_Standard_Controller_Update{&nes_controller, .A, .Released}}
+	peripheral_mappings[.S] = {.Down = NES_Standard_Controller_Update{&nes_controller, .B, .Pressed}, .Up = NES_Standard_Controller_Update{&nes_controller, .B, .Released}}
+	peripheral_mappings[.Z] = {.Down = NES_Standard_Controller_Update{&nes_controller, .Select, .Pressed}, .Up = NES_Standard_Controller_Update{&nes_controller, .Select, .Released}}
+	peripheral_mappings[.X] = {.Down = NES_Standard_Controller_Update{&nes_controller, .Start, .Pressed}, .Up = NES_Standard_Controller_Update{&nes_controller, .Start, .Released}}
+	peripheral_mappings[.UP] = {.Down = NES_Standard_Controller_Update{&nes_controller, .Up, .Pressed}, .Up = NES_Standard_Controller_Update{&nes_controller, .Up, .Released}}
+	peripheral_mappings[.DOWN] = {.Down = NES_Standard_Controller_Update{&nes_controller, .Down, .Pressed}, .Up = NES_Standard_Controller_Update{&nes_controller, .Down, .Released}}
+	peripheral_mappings[.LEFT] = {.Down = NES_Standard_Controller_Update{&nes_controller, .Left, .Pressed}, .Up = NES_Standard_Controller_Update{&nes_controller, .Left, .Released}}
+	peripheral_mappings[.RIGHT] = {.Down = NES_Standard_Controller_Update{&nes_controller, .Right, .Pressed}, .Up = NES_Standard_Controller_Update{&nes_controller, .Right, .Released}}
+	defer delete(peripheral_mappings)
 
-	ui_controllers := [1]UI_Controller{
-		{
-			peripheral = &nes_controller,
-			mapping = nes_controller_mapping,
-		}
-	}
-
-	ui := ui_init(ui_controllers[:])
+	ui := ui_init(nes, nes_mappings, peripheral_mappings)
 	defer ui_free(&ui)
 
 	for ui_poll_event(&ui) {
 		frame_start := time.tick_now()
 		is_odd_frame := nes.ppu.is_odd_frame
 
-		// Emulate 1 frame
-		for nes.ppu.is_odd_frame == is_odd_frame {
-			nes_tick(nes)
+		if !nes.breakpoint {
+			// Emulate 1 frame
+			for nes.ppu.is_odd_frame == is_odd_frame {
+				nes_tick(nes)
+			}
+		} else {
+			// When breakpoint is active, steps of the system will be controlled by user inputs
 		}
 		
 		ui_update_texture(&ui, nes.ppu.framebuffer[:])
