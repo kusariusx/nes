@@ -44,7 +44,7 @@ ROM_Header :: struct { // First 16-bytes of the ROM
     },
 
     // Precalculated format-agnostic info
-    prg_ram_size: u16,
+    prg_ram_size: int,
 }
 
 ROM :: struct {
@@ -124,7 +124,7 @@ rom_free :: proc(rom: ^ROM) {
     free(rom)
 }
 
-rom_prg_ram_size :: proc(rom: ^ROM) -> u16 {
+rom_prg_ram_size :: proc(rom: ^ROM) -> int {
     switch flags in rom.header.format_specific_flags {
     case INES_Header_Data:
         if flags.flags_10.prg_ram_present == 1 {
@@ -134,7 +134,7 @@ rom_prg_ram_size :: proc(rom: ^ROM) -> u16 {
         }
 
         if flags.flags_8 > 0 {
-            return u16(flags.flags_8) * PRG_RAM_BANK_SIZE
+            return int(flags.flags_8) * PRG_RAM_BANK_SIZE
         }
 
         // When both flags_8 and flags_10.prg_ram_present are 0, we assume a single 8 KB bank of PRG-RAM
