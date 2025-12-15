@@ -90,6 +90,8 @@ PPU :: struct {
     sprite_y_position: u8,
     sprite_tile_number: u8,
 
+    suppress_vbl_set: bool,
+
     framebuffer: [256 * 240]u8,
 }
 
@@ -104,6 +106,11 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
 
         // Only bits 5-7 of the value are loaded onto the bus, others are left unchanged
         p.io_bus_value = (p.io_bus_value & 0x1F) | (value & 0xE0)
+
+        // If VBL is read by the CPU at the exact cycle it is set (scanline 241, cycle 1), setting is suppressed
+        if p.scanline == 241 && p.scanline_cycle == 1 {
+            p.suppress_vbl_set = true
+        }
     case 4: // OAMDATA
         // TODO: if OAMDATA is read during rendering, different values are returned (based on sprite evaluation state)
         p.io_bus_value = p.oam[p.OAMADDR]
@@ -505,8 +512,12 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
         // PPU is idle during this scanline
     case 241 ..= 260: // VBlank scanlines
         if p.scanline == 241 && p.scanline_cycle == 1 {
-            // Set VBlank flag on the second cycle of 241st scanline
-            p.PPUSTATUS.V = 1
+            if !p.suppress_vbl_set {
+                // Set VBlank flag on the second cycle of 241st scanline
+                p.PPUSTATUS.V = 1
+            }
+
+            p.suppress_vbl_set = false
         }
     }
 
