@@ -1,6 +1,6 @@
 package main
 
-import "core:fmt"
+import "core:log"
 import "core:mem"
 import "core:os"
 import "core:time"
@@ -10,20 +10,25 @@ import sdl "vendor:sdl2"
 TARGET_FPS :: 60.0
 FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
 
-ROM_PATH :: "games/Legend of Zelda, The (USA) (Rev 1).nes"
+ROM_PATH :: "games/Super_mario_brothers.nes"
 
 main :: proc() {
 	when ODIN_DEBUG {
+		// Set up tracking allocator
 		track: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&track, context.allocator)
 		context.allocator = mem.tracking_allocator(&track)
-
 		defer tracking_allocator_report(track)
 	}
 
+	// Set up logger
+	logger := log.create_console_logger(opt = {})
+	context.logger = logger
+	defer log.destroy_console_logger(logger)
+
 	rom_data, err_read := os.read_entire_file_from_filename_or_err(ROM_PATH)
 	if err_read != nil {
-		fmt.eprintfln("unable to read ROM: %v", err_read)
+		log.errorf("unable to read ROM: %v", err_read)
 		return
 	}
 	defer delete(rom_data)
@@ -32,24 +37,24 @@ main :: proc() {
 	if err_init != nil {
 		if err_mapper, ok := err_init.(Mapper_Initialization_Error); ok {
 			if err_mapper_not_supported, ok := err_mapper.(Mapper_Not_Supported); ok {
-				fmt.eprintfln("mapper %d is not supported", err_mapper_not_supported.mapper_number)
+				log.errorf("mapper %d is not supported", err_mapper_not_supported.mapper_number)
 				return
 			}
 		}
 
-		fmt.eprintf("unable to init NES: %v", err_init)
+		log.errorf("unable to init NES: %v", err_init)
 		return
 	}
 	defer nes_free(nes)
 
-	fmt.printfln("successfully loaded ROM with mapper %d", mapper_number(nes.rom))
+	log.infof("successfully loaded ROM with mapper %d", mapper_number(nes.rom))
 
 	nes_reset(nes)
 
 	nes_mappings := make(map[sdl.Keycode][UI_Key_State]proc(nes: ^NES))
 	nes_mappings[.B] = #partial {.Down = proc(nes: ^NES) { 
 		nes.breakpoint = !nes.breakpoint 
-		fmt.printfln("breakpoint %s", nes.breakpoint ? "enabled" : "disabled")
+		log.infof("breakpoint %s", nes.breakpoint ? "enabled" : "disabled")
 	}}
 	nes_mappings[.V] = #partial {.Down = proc(nes: ^NES) { 
 		if nes.breakpoint {
@@ -103,16 +108,21 @@ main :: proc() {
 
 tracking_allocator_report :: proc(track: mem.Tracking_Allocator) {
 	if len(track.allocation_map) > 0 {
-		fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+		log.errorf("=== %v allocations not freed: ===\n", len(track.allocation_map))
 		for _, entry in track.allocation_map {
-			fmt.eprintf("- %v bytes leaked @ %v\n", entry.size, entry.location)
+			log.errorf("- %v bytes leaked @ %v\n", entry.size, entry.location)
 		}
 	}
 
 	if len(track.bad_free_array) > 0 {
-		fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+		log.errorf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
 		for entry in track.bad_free_array {
-			fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+			log.errorf("- %p @ %v\n", entry.memory, entry.location)
 		}
 	}
+}
+
+@(disabled=!ODIN_DEBUG) // Disabled when not in debug
+logf :: proc(format: string, args: ..any, loc := #caller_location) { // Short name because all components log using this
+	log.debugf(format, ..args, location = loc)
 }

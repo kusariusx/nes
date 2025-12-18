@@ -90,7 +90,16 @@ PPU :: struct {
     sprite_y_position: u8,
     sprite_tile_number: u8,
 
-    suppress_vbl_set: bool,
+    // This is used to indicate that VBL is "technically" already set, even though PPUSTATUS.V is not yet set.
+    // This is needed to overcome sequential nature of the emulator - components run one by one in the same thread
+    // (3 times PPU, 1 time CPU), while real hardware components run in parallel.
+    // In concrete terms, this variable is needed to communicate to the CPU that VBL was set "simultaneously" while
+    // it is running.
+    // Most of the time, this variable is false. It is only true when PPU *reaches* the 1st cycle of 241st scanline, and
+    // is set back to false when it is processed (when PPUSTATUS.V is actually set). From CPU's point of view, this
+    // variable is true only in a narrow window when the *last* (of total 3) PPU cycle has reached the 1st cycle of 241st scanline. 
+    // This variable is also used to implement VBL set suppression - it is set to false whenever PPUSTATUS is read.
+    will_set_vbl: bool,
 
     framebuffer: [256 * 240]u8,
 }
@@ -107,10 +116,8 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
         // Only bits 5-7 of the value are loaded onto the bus, others are left unchanged
         p.io_bus_value = (p.io_bus_value & 0x1F) | (value & 0xE0)
 
-        // If VBL is read by the CPU at the exact cycle it is set (scanline 241, cycle 1), setting is suppressed
-        if p.scanline == 241 && p.scanline_cycle == 1 {
-            p.suppress_vbl_set = true
-        }
+        // Reading VBL suppresses setting it
+        p.will_set_vbl = false
     case 4: // OAMDATA
         // TODO: if OAMDATA is read during rendering, different values are returned (based on sprite evaluation state)
         p.io_bus_value = p.oam[p.OAMADDR]
@@ -511,17 +518,16 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     case 240: // Post-render scanline
         // PPU is idle during this scanline
     case 241 ..= 260: // VBlank scanlines
-        if p.scanline == 241 && p.scanline_cycle == 1 {
-            if !p.suppress_vbl_set {
-                // Set VBlank flag on the second cycle of 241st scanline
-                p.PPUSTATUS.V = 1
-            }
-
-            p.suppress_vbl_set = false
+        if p.scanline == 241 && p.scanline_cycle == 1 && p.will_set_vbl {
+            // Set VBlank flag on the second cycle of 241st scanline
+            p.PPUSTATUS.V = 1
         }
     }
 
     p.scanline_cycle += 1
+
+    // This is set AFTER we increment the cycle
+    p.will_set_vbl = p.scanline == 241 && p.scanline_cycle == 1
 
     // 261-st scanline varies in length, could be 341 or 340 cycles long
     // All other scanlines are 341 cycles long

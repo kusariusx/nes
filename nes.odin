@@ -1,6 +1,6 @@
 package main
 
-import "core:fmt"
+import "core:log"
 import "core:mem"
 
 NES :: struct {
@@ -123,10 +123,10 @@ nes_debug_run_cpu_instruction :: proc(nes: ^NES) {
     nes_tick(nes) // Run for 1 cycle to decode instruction
 
     // Print CPU state before the instruction is executed
-    fmt.println("------------------ CPU STATE ------------------")
-    fmt.printfln("P = %02X (%08b) | PC = %04X (%s)", byte(nes.cpu.P), byte(nes.cpu.P), nes.cpu.PC - 1, nes.cpu.instruction.mnemonic)
-    fmt.printfln("A = %02X | X = %02X | Y = %02X | S = %02X", nes.cpu.A, nes.cpu.X, nes.cpu.Y, nes.cpu.S)
-    fmt.println("-----------------------------------------------")
+    log.infof("------------------ CPU STATE ------------------")
+    log.infof("P = %02X (%08b) | PC = %04X (%s)", byte(nes.cpu.P), byte(nes.cpu.P), nes.cpu.PC - 1, nes.cpu.instruction.mnemonic)
+    log.infof("A = %02X | X = %02X | Y = %02X | S = %02X", nes.cpu.A, nes.cpu.X, nes.cpu.Y, nes.cpu.S)
+    log.infof("-----------------------------------------------")
 
     for nes.cpu.instruction != nil { // Execture the rest of the instruction
         nes_tick(nes)
