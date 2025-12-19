@@ -77,6 +77,7 @@ PPU :: struct {
     sprite_eval_done: bool,
     sprite_eval_pending_reads: u8, // To mark that we need to read 3 more OAM bytes during overflow phase
     sprite_eval_sprite_0_present: bool, // Is sprite 0 present during evaluation (will be drawn on the next scanline)
+    sprite_eval_overflow_phase: bool, // Special logic kicks in once we have found more than 8 sprites on a scanline
 
     sprite_0_on_current_scanline: bool,
 
@@ -247,7 +248,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                     p.sprite_eval_n = (p.sprite_eval_n + 1) & 0x3F // Wrap to 0-63
                     if p.sprite_eval_n == 0 { // Overflow to 0 - all 64 sprites have been evaluated
                         p.sprite_eval_done = true
-                    }  
+                    }
                 }
 
                 increment_m :: proc(p: ^PPU) {
@@ -255,6 +256,11 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         // Move on to the next sprite
                         p.sprite_eval_m = 0
                         increment_n(p)
+
+                        // We transition to overflow phase when once we have processed the last byte of 8th sprite on a scanline
+                        if p.sprite_eval_found == 8 {
+                            p.sprite_eval_overflow_phase = true
+                        }
                     } else {
                         // Move on to the next byte within the sprite
                         p.sprite_eval_m += 1 
@@ -271,6 +277,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                     p.sprite_eval_pending_reads = 0
                     p.sprite_eval_done = false
                     p.sprite_eval_sprite_0_present = false
+                    p.sprite_eval_overflow_phase = false
                 }
 
                 switch p.scanline_cycle {
@@ -301,9 +308,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         break
                     }
 
-                    // Already found 8 sprites to draw, but still have sprites to evaluate - transition
-                    // to sprite overflow phase.
-                    if p.sprite_eval_found == 8 {
+                    if p.sprite_eval_overflow_phase {
                         if is_odd_cycle {
                             oam_pos := (p.sprite_eval_n << 2) + p.sprite_eval_m
                             p.sprite_eval_oam_data = p.oam[oam_pos]
