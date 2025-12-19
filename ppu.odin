@@ -101,6 +101,12 @@ PPU :: struct {
     // This variable is also used to implement VBL set suppression - it is set to false whenever PPUSTATUS is read.
     will_set_vbl: bool,
 
+    // Same purpose and reasoning as above, but to let CPU know the VBL has been cleared simultaneously during its tick.
+    will_clear_vbl: bool,
+
+    // Same as above, but to let CPU know that the concurrent PPU cycle is about to be skipped.
+    will_skip_cycle: bool,
+
     framebuffer: [256 * 240]u8,
 }
 
@@ -211,13 +217,17 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     is_background_enabled := p.PPUMASK.b == 1
     is_sprite_enabled := p.PPUMASK.s == 1
     is_rendering_enabled := is_background_enabled || is_sprite_enabled
+
+    is_pre_render_scanline := p.scanline == 261
+    is_visible_scanline := !is_pre_render_scanline
+
+    if p.will_skip_cycle {
+        p.scanline_cycle += 1
+    }
    
     switch p.scanline {
     case 0 ..= 239, 261: // Visible scanlines and pre-render scanline
         // Joining visible and pre-render scanlines because a lot of identical things happen on both of them
-
-        is_pre_render_scanline := p.scanline == 261
-        is_visible_scanline := !is_pre_render_scanline
 
         if is_pre_render_scanline && p.scanline_cycle == 1 {
             // The three PPUSTATUS flags are automatically cleared on dot 1 of the pre-render scanline
@@ -528,15 +538,13 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
     // This is set AFTER we increment the cycle
     p.will_set_vbl = p.scanline == 241 && p.scanline_cycle == 1
+    p.will_clear_vbl = is_pre_render_scanline && p.scanline_cycle == 1
 
-    // 261-st scanline varies in length, could be 341 or 340 cycles long
-    // All other scanlines are 341 cycles long
-    scanline_length := 341
-    if p.scanline == 261 && p.is_odd_frame && is_rendering_enabled {
-        scanline_length = 340
-    }
-
-    if p.scanline_cycle == scanline_length { // Scanline is completed
+    // Pre-render scanline varies in length, could be 341 or 340 cycles long.
+    // All other scanlines are 341 cycles long.
+    p.will_skip_cycle = is_pre_render_scanline && p.scanline_cycle == 339 && p.is_odd_frame && is_rendering_enabled
+    
+    if p.scanline_cycle == 341 { // Scanline is completed
         p.scanline_cycle = 0
         p.scanline += 1
 

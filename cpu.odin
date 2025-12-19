@@ -175,9 +175,11 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 }
 
 cpu_detect_nmi :: proc(c: ^CPU, b: ^NES_CPU_Bus) {
-	// NMI edge detection
-	// PPUSTATUS.V and PPUCTRL.V and AND'ed together and fed to CPU's NMI line
-	nmi_line := (b.ppu.PPUSTATUS.V == 1 || b.ppu.will_set_vbl) && b.ppu.PPUCTRL.V == 1
+	// NMI edge detection.
+	// PPUSTATUS.V and PPUCTRL.V are AND'ed together and fed to CPU's NMI line.
+	// Additionally, we need to take into account the fact that VBL could potentially 
+	// be set or cleared *simultaneously* with currently running CPU cycle.
+	nmi_line := (b.ppu.PPUSTATUS.V == 1 || b.ppu.will_set_vbl) && !b.ppu.will_clear_vbl && b.ppu.PPUCTRL.V == 1
 	if !c.nmi_line_prev && nmi_line {
 		c.nmi_latch = true
 	}
