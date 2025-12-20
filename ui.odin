@@ -22,6 +22,14 @@ NES_PALETTE := [64]u32{
     0xE4E594, 0xCFEF96, 0xBDF4AB, 0xB3F3CC, 0xB5EBF2, 0xB8B8B8, 0x000000, 0x000000,
 }
 
+// On real NTSC TVs, not all 256x240 pixels produced by the PPU are actually visible on the screen.
+// Due to different form-factors of the TVs, and due to how PPU signal is interpreted by the TV,
+// some of the pixels on the edges of the screen might be cut off.
+// This structure defines how many pixels are cut off on each edge.
+Overscan_Config :: struct {
+    left, top, right, bottom: i32
+}
+
 UI_Key_State :: enum {
     Down,
     Up,
@@ -37,6 +45,7 @@ UI :: struct {
     window: ^sdl.Window,
     renderer: ^sdl.Renderer,
     texture: ^sdl.Texture,
+    texture_source_rect: sdl.Rect,
 
     // UI is able to control the entire system
     nes: ^NES,
@@ -44,14 +53,28 @@ UI :: struct {
     peripheral_mappings: Peripheral_Mappings,
 }
 
-ui_init :: proc(nes: ^NES, nes_mappings: NES_Mappings, peripheral_mappings: Peripheral_Mappings) -> UI {
-    window_flags := sdl.WindowFlags{sdl.WindowFlag.OPENGL}
+ui_init :: proc(
+    nes: ^NES, 
+    nes_mappings: NES_Mappings, 
+    peripheral_mappings: Peripheral_Mappings,
+    overscan_config: Overscan_Config,
+) -> UI {
+    screen_texture_width := NES_SCREEN_WIDTH - overscan_config.left - overscan_config.right
+    screen_texture_height := NES_SCREEN_HEIGHT - overscan_config.top - overscan_config.bottom
+
+    // Validate provided overscan config
+    if screen_texture_width <= 0 || screen_texture_width > NES_SCREEN_WIDTH || 
+        screen_texture_height <= 0 || screen_texture_height > NES_SCREEN_HEIGHT {
+        panic("overscan config is invalid")
+    }
+
+    window_flags := sdl.WindowFlags{.OPENGL, .ALLOW_HIGHDPI, .RESIZABLE}
 	window := sdl.CreateWindow(
 		"NES",
 		sdl.WINDOWPOS_UNDEFINED,
 		sdl.WINDOWPOS_UNDEFINED,
-		WINDOW_WIDTH,
-		WINDOW_HEIGHT,
+		screen_texture_width * WINDOW_SCALE,
+		screen_texture_height * WINDOW_SCALE,
 		window_flags,
 	)
 	if window == nil {
@@ -80,6 +103,12 @@ ui_init :: proc(nes: ^NES, nes_mappings: NES_Mappings, peripheral_mappings: Peri
         window = window,
         renderer = renderer,
         texture = texture,
+        texture_source_rect = sdl.Rect{
+            x = overscan_config.left,
+            y = overscan_config.top,
+            w = screen_texture_width,
+            h = screen_texture_height,
+        },
         nes = nes,
         nes_mappings = nes_mappings,
         peripheral_mappings = peripheral_mappings,
@@ -115,7 +144,7 @@ ui_update_texture :: proc(ui: ^UI, framebuffer: []u8) {
 
 ui_render :: proc(ui: ^UI) {
     sdl.RenderClear(ui.renderer)    
-    sdl.RenderCopy(ui.renderer, ui.texture, nil, nil)    
+    sdl.RenderCopy(ui.renderer, ui.texture, &ui.texture_source_rect, nil)    
     sdl.RenderPresent(ui.renderer)
 }
 
