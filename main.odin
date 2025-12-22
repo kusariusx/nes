@@ -78,7 +78,7 @@ main :: proc() {
 	peripheral_mappings[.RIGHT] = {.Down = NES_Standard_Controller_Update{&nes_controller, .Right, .Pressed}, .Up = NES_Standard_Controller_Update{&nes_controller, .Right, .Released}}
 	defer delete(peripheral_mappings)
 
-	ui := ui_init(nes, nes_mappings, peripheral_mappings)
+	ui := ui_init(nes, nes_mappings, peripheral_mappings, Overscan_Config{0, 0, 0, 0})
 	defer ui_free(&ui)
 
 	for ui_poll_event(&ui) {
