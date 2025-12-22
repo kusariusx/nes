@@ -7,18 +7,18 @@ APU :: struct {
     status: u8,
 }
 
-apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, handled: bool) {
+apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
     switch address {
     case 0x4015: // Status
         value := a.status
 
         a.status &= ~u8(1 << 6) // Clear frame interrupt flag
 
-        return value, true
+        return value, 0b11011111 // Bit 5 is open bus
     case 0x4017: // Frame counter
     }
 
-    return 0, false
+    return 0, 0
 }
 
 apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
