@@ -10,7 +10,7 @@ import sdl "vendor:sdl2"
 TARGET_FPS :: 60.0
 FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
 
-ROM_PATH :: "games/Super_mario_brothers.nes"
+ROM_PATH :: "test/other/AccuracyCoin/AccuracyCoin.nes"
 
 main :: proc() {
 	when ODIN_DEBUG {
