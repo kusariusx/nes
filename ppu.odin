@@ -77,6 +77,7 @@ PPU :: struct {
     sprite_eval_done: bool,
     sprite_eval_pending_reads: u8, // To mark that we need to read 3 more OAM bytes during overflow phase
     sprite_eval_sprite_0_present: bool, // Is sprite 0 present during evaluation (will be drawn on the next scanline)
+    sprite_eval_overflow_phase: bool, // Special logic kicks in once we have found more than 8 sprites on a scanline
 
     sprite_0_on_current_scanline: bool,
 
@@ -89,6 +90,23 @@ PPU :: struct {
     // Latches to temporary store fetched sprite data
     sprite_y_position: u8,
     sprite_tile_number: u8,
+
+    // This is used to indicate that VBL is "technically" already set, even though PPUSTATUS.V is not yet set.
+    // This is needed to overcome sequential nature of the emulator - components run one by one in the same thread
+    // (3 times PPU, 1 time CPU), while real hardware components run in parallel.
+    // In concrete terms, this variable is needed to communicate to the CPU that VBL was set "simultaneously" while
+    // it is running.
+    // Most of the time, this variable is false. It is only true when PPU *reaches* the 1st cycle of 241st scanline, and
+    // is set back to false when it is processed (when PPUSTATUS.V is actually set). From CPU's point of view, this
+    // variable is true only in a narrow window when the *last* (of total 3) PPU cycle has reached the 1st cycle of 241st scanline. 
+    // This variable is also used to implement VBL set suppression - it is set to false whenever PPUSTATUS is read.
+    will_set_vbl: bool,
+
+    // Same purpose and reasoning as above, but to let CPU know the VBL has been cleared simultaneously during its tick.
+    will_clear_vbl: bool,
+
+    // Same as above, but to let CPU know that the concurrent PPU cycle is about to be skipped.
+    will_skip_cycle: bool,
 
     framebuffer: [256 * 240]u8,
 }
@@ -104,6 +122,9 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
 
         // Only bits 5-7 of the value are loaded onto the bus, others are left unchanged
         p.io_bus_value = (p.io_bus_value & 0x1F) | (value & 0xE0)
+
+        // Reading VBL suppresses setting it
+        p.will_set_vbl = false
     case 4: // OAMDATA
         // TODO: if OAMDATA is read during rendering, different values are returned (based on sprite evaluation state)
         p.io_bus_value = p.oam[p.OAMADDR]
@@ -144,13 +165,7 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
 
     switch reg {
     case 0: // PPUCTRL
-        orig_nmi_enabled := p.PPUCTRL.V
         p.PPUCTRL = PPUCTRL_Bits(value)
-
-        // If VBlank NMI was enabled during VBlank - request NMI immediately
-        if orig_nmi_enabled == 0 && p.PPUCTRL.V == 1 && p.PPUSTATUS.V == 1 {
-            b.cpu_bus.nmi_pending = true
-        }
 
         // Update bits 10 and 11 of PPU's internal t register
         p.t = (p.t & 0xF3FF) | (u16(p.PPUCTRL.NN) << 10)
@@ -203,21 +218,23 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     is_background_enabled := p.PPUMASK.b == 1
     is_sprite_enabled := p.PPUMASK.s == 1
     is_rendering_enabled := is_background_enabled || is_sprite_enabled
+
+    is_pre_render_scanline := p.scanline == 261
+    is_visible_scanline := !is_pre_render_scanline
+
+    if p.will_skip_cycle {
+        p.scanline_cycle += 1
+    }
    
     switch p.scanline {
     case 0 ..= 239, 261: // Visible scanlines and pre-render scanline
         // Joining visible and pre-render scanlines because a lot of identical things happen on both of them
 
-        is_pre_render_scanline := p.scanline == 261
-        is_visible_scanline := !is_pre_render_scanline
-
-        if is_pre_render_scanline {
+        if is_pre_render_scanline && p.scanline_cycle == 1 {
             // The three PPUSTATUS flags are automatically cleared on dot 1 of the pre-render scanline
-            if p.scanline_cycle == 1 {
-                p.PPUSTATUS.V = 0
-                p.PPUSTATUS.S = 0
-                p.PPUSTATUS.O = 0
-            }
+            p.PPUSTATUS.V = 0
+            p.PPUSTATUS.S = 0
+            p.PPUSTATUS.O = 0
         }
 
         if is_rendering_enabled {
@@ -231,7 +248,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                     p.sprite_eval_n = (p.sprite_eval_n + 1) & 0x3F // Wrap to 0-63
                     if p.sprite_eval_n == 0 { // Overflow to 0 - all 64 sprites have been evaluated
                         p.sprite_eval_done = true
-                    }  
+                    }
                 }
 
                 increment_m :: proc(p: ^PPU) {
@@ -239,6 +256,11 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         // Move on to the next sprite
                         p.sprite_eval_m = 0
                         increment_n(p)
+
+                        // We transition to overflow phase when once we have processed the last byte of 8th sprite on a scanline
+                        if p.sprite_eval_found == 8 {
+                            p.sprite_eval_overflow_phase = true
+                        }
                     } else {
                         // Move on to the next byte within the sprite
                         p.sprite_eval_m += 1 
@@ -255,6 +277,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                     p.sprite_eval_pending_reads = 0
                     p.sprite_eval_done = false
                     p.sprite_eval_sprite_0_present = false
+                    p.sprite_eval_overflow_phase = false
                 }
 
                 switch p.scanline_cycle {
@@ -285,9 +308,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         break
                     }
 
-                    // Already found 8 sprites to draw, but still have sprites to evaluate - transition
-                    // to sprite overflow phase.
-                    if p.sprite_eval_found == 8 {
+                    if p.sprite_eval_overflow_phase {
                         if is_odd_cycle {
                             oam_pos := (p.sprite_eval_n << 2) + p.sprite_eval_m
                             p.sprite_eval_oam_data = p.oam[oam_pos]
@@ -512,27 +533,23 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     case 240: // Post-render scanline
         // PPU is idle during this scanline
     case 241 ..= 260: // VBlank scanlines
-        if p.scanline == 241 && p.scanline_cycle == 1 {
+        if p.scanline == 241 && p.scanline_cycle == 1 && p.will_set_vbl {
             // Set VBlank flag on the second cycle of 241st scanline
             p.PPUSTATUS.V = 1
-
-            // Request NMI if enabled
-            if p.PPUCTRL.V == 1 {
-                b.cpu_bus.nmi_pending = true
-            }
         }
     }
 
     p.scanline_cycle += 1
 
-    // 261-st scanline varies in length, could be 341 or 340 cycles long
-    // All other scanlines are 341 cycles long
-    scanline_length := 341
-    if p.scanline == 261 && p.is_odd_frame && is_rendering_enabled {
-        scanline_length = 340
-    }
+    // This is set AFTER we increment the cycle
+    p.will_set_vbl = p.scanline == 241 && p.scanline_cycle == 1
+    p.will_clear_vbl = is_pre_render_scanline && p.scanline_cycle == 1
 
-    if p.scanline_cycle == scanline_length { // Scanline is completed
+    // Pre-render scanline varies in length, could be 341 or 340 cycles long.
+    // All other scanlines are 341 cycles long.
+    p.will_skip_cycle = is_pre_render_scanline && p.scanline_cycle == 339 && p.is_odd_frame && is_rendering_enabled
+    
+    if p.scanline_cycle == 341 { // Scanline is completed
         p.scanline_cycle = 0
         p.scanline += 1
 

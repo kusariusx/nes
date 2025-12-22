@@ -30,7 +30,7 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
     }
 }
 
-apu_tick :: proc(a: ^APU, cpu_bus: ^NES_CPU_Bus) {
+apu_tick :: proc(a: ^APU) {
     frame_counter_mode := a.frame_counter_flags >> 7
     frame_counter_interrupt_inhibit := (a.frame_counter_flags >> 6) & 1
 
@@ -57,10 +57,5 @@ apu_tick :: proc(a: ^APU, cpu_bus: ^NES_CPU_Bus) {
         if frame_counter_mode == 0 && frame_counter_interrupt_inhibit == 0 {
             a.status |= 1 << 6
         }
-    }
-
-    frame_interrupt := (a.status >> 6) & 1
-    if frame_interrupt == 1 { // Frame interrupt flag s connected to CPU's IRQ line
-        cpu_bus.irq_pending = true
     }
 }

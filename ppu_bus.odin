@@ -1,9 +1,10 @@
 package main
 
 PPU_OPEN_BUS_VALUE :: 0xFF
+VRAM_BANK_SIZE :: 1024
 
 NES_PPU_Bus :: struct {
-    vram: [2 * 1024]byte,
+    vram: [2 * VRAM_BANK_SIZE]byte,
     palette_ram: [32]byte,
 
     cpu_bus: ^NES_CPU_Bus,
@@ -24,7 +25,17 @@ ppu_bus_read :: proc(b: ^NES_PPU_Bus, address: u16) -> u8 {
         // If cartridge did not handle this read, try to map to internal VRAM
         switch address {
         case 0x2000 ..= 0x2FFF:
-            effective_address := (address - 0x2000) & 0x7FF // Mask to 2 KB space
+            nametable := (address >> 10) & 0b11
+
+            bank: u16
+            switch b.rom.header.flags_6.nametable_arrangement {
+            case 0:
+                bank = nametable >> 1
+            case 1:
+                bank = nametable & 1
+            }
+
+            effective_address := bank * VRAM_BANK_SIZE + (address & 0x3FF)
             return b.vram[effective_address]
         case:
             return PPU_OPEN_BUS_VALUE
@@ -55,7 +66,17 @@ ppu_bus_write :: proc(b: ^NES_PPU_Bus, address: u16, value: u8) {
 
         switch address {
         case 0x2000 ..= 0x2FFF:
-            effective_address := (address - 0x2000) & 0x7FF
+            nametable := (address >> 10) & 0b11
+
+            bank: u16
+            switch b.rom.header.flags_6.nametable_arrangement {
+            case 0:
+                bank = nametable >> 1
+            case 1:
+                bank = nametable & 1
+            }
+
+            effective_address := bank * VRAM_BANK_SIZE + (address & 0x3FF)
             b.vram[effective_address] = value
         }
     case 0x3F00 ..= 0x3FFF:
