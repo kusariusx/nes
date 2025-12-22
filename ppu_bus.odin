@@ -17,8 +17,8 @@ ppu_bus_read :: proc(b: ^NES_PPU_Bus, address: u16) -> u8 {
     address := address & 0x3FFF // PPU address bus is 14-bit
     switch address {
     case 0x0000 ..= 0x3EFF: // This address space could be remapped by cardridge, try it
-        value, handled := mapper_ppu_read(b.mapper, b.rom, address)
-        if handled {
+        value, mask := mapper_ppu_read(b.mapper, b.rom, address)
+        if mask != 0 {
             return value
         } 
 

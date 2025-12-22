@@ -12,7 +12,7 @@ IO :: struct {
     ports: [IO_Port]Peripheral,
 }
 
-io_read_register :: proc(io: ^IO, address: u16) -> (value: u8, handled: bool) {
+io_read_register :: proc(io: ^IO, address: u16) -> (value: u8, mask: u8) {
     switch address {
     case 0x4016:
         result := u8(0)
@@ -34,7 +34,7 @@ io_read_register :: proc(io: ^IO, address: u16) -> (value: u8, handled: bool) {
             result |= input & 0b11111
         }
         
-        return result, true
+        return result, 0b00011111 // IO ports are 5 bits wide, the upper 3 bits are open bus
     case 0x4017:
         result := u8(0)
 
@@ -48,10 +48,10 @@ io_read_register :: proc(io: ^IO, address: u16) -> (value: u8, handled: bool) {
             result |= input & 0b11111
         }
         
-        return result, true
+        return result, 0b00011111
     }
 
-    return 0, false
+    return 0, 0
 }
 
 io_write_register :: proc(io: ^IO, address: u16, value: u8) -> (handled: bool) {

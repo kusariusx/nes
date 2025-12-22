@@ -18,29 +18,35 @@ NES_CPU_Bus :: struct {
     oam_dma_address: u16,
     oam_dma_data: u8,
 
-    // Reading open bus returns the last value read from valid address
-    last_read_value: u8,
+    // Reading open bus returns the last value read from valid address, or written to any address
+    data_bus_value: u8,
 }
 
 nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16) -> u8 {
-    value: u8
-    handled: bool
+    value, mask: u8
     
     if address >= 0x4020 && address <= 0xFFFF { // Unmapped space, let mapper handle
-        value, handled = mapper_cpu_read(b.mapper, b.rom, address)
+        value, mask = mapper_cpu_read(b.mapper, b.rom, address)
     } else {
-        value, handled = nes_cpu_bus_resolve_read(b, address)
+        value, mask = nes_cpu_bus_resolve_read(b, address)
     }
 
-    if !handled { // Read was not handled - open bus
-        return b.last_read_value
+    // Apply active value bits and retain inactive bits
+    res := (b.data_bus_value & ~mask) | (value & mask)
+    
+    // Address 0x4015 is special - all data read from APU status register is internal to the APU chip itself,
+    // so the data bus is not used. However, we still retain inactive bits from the data bus, but we do not update it
+    // with the value we've read.
+    if address != 0x4015 {
+        b.data_bus_value = res
     }
 
-    b.last_read_value = value
-    return value
+    return res
 }
 
 nes_cpu_bus_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
+    b.data_bus_value = value
+
     if address >= 0x4020 && address <= 0xFFFF { 
         mapper_cpu_write(b.mapper, b.rom, address, value)
         return // Ignore unhandled writes
@@ -49,15 +55,16 @@ nes_cpu_bus_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
     nes_cpu_bus_resolve_write(b, address, value)
 }
 
-// Handles read-write and read-only addresses
-nes_cpu_bus_resolve_read :: proc(b: ^NES_CPU_Bus, address: u16) -> (value: u8, handled: bool) {
+// Handles read-write and read-only addresses.
+// Returns the value and a mask representing what bits of the value are active. Bits masked with 0's are open bus.
+nes_cpu_bus_resolve_read :: proc(b: ^NES_CPU_Bus, address: u16) -> (value: u8, mask: u8) {
     switch address {
     case 0 ..= 0x1FFF: // Internal RAM (1 real and 3 mirrors)
         effective_address := address & 0x7FF // Mask to 11 bits (2 KB)
-        return b.ram[effective_address], true
+        return b.ram[effective_address], 0xFF
     case 0x2000 ..= 0x3FFF: // PPU registers (8 real registers, the rest are mirrors)
         effective_address := u8(address & 0x7) // Mask to 3 bits (8 registers)
-        return ppu_read_register(b.ppu, b.ppu_bus, effective_address), true
+        return ppu_read_register(b.ppu, b.ppu_bus, effective_address), 0xFF
     case 0x4000 ..= 0x4017: // APU and IO registers
         if address == 0x4016 || address == 0x4017 { // IO registers
             return io_read_register(b.io, address)
@@ -68,7 +75,7 @@ nes_cpu_bus_resolve_read :: proc(b: ^NES_CPU_Bus, address: u16) -> (value: u8, h
     case 0x4020 ..= 0xFFFF: // Unmapped - cartridges are free to map this area to anything 
     }
 
-    return 0, false
+    return 0, 0
 }
 
 // Handles read-write and write-only addresses

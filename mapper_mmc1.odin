@@ -15,13 +15,13 @@ MMC1 :: struct{
     chr_ram: [0x2000]byte, // 8 KB of potential CHR-RAM
 } 
 
-mmc1_cpu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handled: bool) {
+mmc1_cpu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, mask: u8) {
     switch address {
     case 0x6000 ..= 0x7FFF: // Optional PRG-RAM
         prg_ram_enabled := (m.prg_bank >> 4) & 1 == 0
         if prg_ram_enabled && r.header.prg_ram_size > 0 {
             effective_address := int(address - 0x6000) % r.header.prg_ram_size
-            return m.prg_ram[effective_address], true
+            return m.prg_ram[effective_address], 0xFF
         }
     case 0x8000 ..= 0xBFFF: // 16 KB PRG-ROM bank
         bank: u8
@@ -39,7 +39,7 @@ mmc1_cpu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
         bank %= r.header.prg_rom_banks
 
         effective_address := PRG_ROM_BANK_SIZE * int(bank) + int(address - 0x8000)
-        return r.prg_rom[effective_address], true
+        return r.prg_rom[effective_address], 0xFF
     case 0xC000 ..= 0xFFFF: // 16 KB PRG-ROM bank
         bank: u8
 
@@ -56,10 +56,10 @@ mmc1_cpu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
         bank %= r.header.prg_rom_banks
 
         effective_address := PRG_ROM_BANK_SIZE * int(bank) + int(address - 0xC000)
-        return r.prg_rom[effective_address], true
+        return r.prg_rom[effective_address], 0xFF
     }
 
-    return 0, false
+    return 0, 0
 }
 
 mmc1_cpu_write :: proc(m: ^MMC1, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
@@ -106,7 +106,7 @@ mmc1_cpu_write :: proc(m: ^MMC1, r: ^ROM, address: u16, value: u8) -> (write_han
     return false
 }
 
-mmc1_ppu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handled: bool) {
+mmc1_ppu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, mask: u8) {
     switch address {
     case 0x0000 ..= 0x0FFF:
         bank := m.chr_bank_0
@@ -120,9 +120,9 @@ mmc1_ppu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
         
         effective_address := 0x1000 * int(bank) + int(address)    
         if r.header.chr_rom_banks == 0 {
-            return m.chr_ram[effective_address], true
+            return m.chr_ram[effective_address], 0xFF
         } else {
-            return r.chr_rom[effective_address], true
+            return r.chr_rom[effective_address], 0xFF
         }
     case 0x1000 ..= 0x1FFF:
         bank := m.chr_bank_1
@@ -135,9 +135,9 @@ mmc1_ppu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
         
         effective_address := 0x1000 * int(bank) + int(address - 0x1000)
         if r.header.chr_rom_banks == 0 {
-            return m.chr_ram[effective_address], true
+            return m.chr_ram[effective_address], 0xFF
         } else {
-            return r.chr_rom[effective_address], true
+            return r.chr_rom[effective_address], 0xFF
         }
     case 0x2000 ..= 0x2FFF: // Internal VRAM
         bank: u16
@@ -158,10 +158,10 @@ mmc1_ppu_read :: proc(m: ^MMC1, r: ^ROM, address: u16) -> (value: u8, read_handl
         }
 
         effective_address := int(bank) * VRAM_BANK_SIZE + int(address & 0x3FF)
-        return m.vram[effective_address], true
+        return m.vram[effective_address], 0xFF
     }
 
-    return 0, false
+    return 0, 0
 }
 
 mmc1_ppu_write :: proc(m: ^MMC1, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
