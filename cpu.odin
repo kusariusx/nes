@@ -116,9 +116,6 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	}
 
 	if cpu.instruction == nil { // We start executing a new instruction
-		// When starting a new instruction, we want to know about any interrupts in advance
-		cpu_detect_nmi(cpu, bus)
-		
 		// This is the first cycle of any instruction
 		// Start with 1 for better alignment with the documentation
 		cpu.instruction_cycle = 1
@@ -130,7 +127,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		// Check for interrupts
 		// Note: when handling interrupts, writes to PC are suppressed, hence not incrementing it
 		if cpu.nmi_pending {
-			logf("acknowledging NMI")
+			trace("acknowledging NMI")
 
 			// Acknowledge NMI
 			cpu.nmi_latch = false
@@ -142,7 +139,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 			cpu.interrupt_vector = NMI_Vector
 			cpu.instruction = &Interrupt_Handler
 		} else if cpu.irq_latch && cpu.P.I == 0 {
-			logf("acknowledging IRQ")
+			trace("acknowledging IRQ")
 
 			cpu.irq_latch = false
 			
@@ -157,7 +154,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		}
 	}
 
-	logf(
+	trace(
 		"(%d, %d) [PC:%04X P:%02X S:%02X A:%02X X:%02X Y:%02X] %d - %s", 
 		bus.ppu.scanline, bus.ppu.scanline_cycle, 
 		cpu.PC, u8(cpu.P), cpu.S, cpu.A, cpu.X, cpu.Y,
@@ -181,21 +178,31 @@ cpu_detect_nmi :: proc(c: ^CPU, b: ^NES_CPU_Bus) {
 	// be set or cleared *simultaneously* with currently running CPU cycle.
 	nmi_line := (b.ppu.PPUSTATUS.V == 1 || b.ppu.will_set_vbl) && !b.ppu.will_clear_vbl && b.ppu.PPUCTRL.V == 1
 	if !c.nmi_line_prev && nmi_line {
+		trace("NMI edge detected")
 		c.nmi_latch = true
 	}
 
-	logf("NMI edge detected: %t", !c.nmi_line_prev && nmi_line)
-	
 	c.nmi_line_prev = nmi_line
 }
 
 // Interrupts are usually polled on the second-to-last cycle of an instruction.
 cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
-	logf("polling for interrupts")
-
 	b, ok := b.(^NES_CPU_Bus)
 	if !ok {
 		return // No-op for test bus
+	}
+
+	// Edge case: NMI latch is updated at the end of every CPU cycle, AFTER the instruction cycle has been executed.
+	// Thus, if NMI occurs at the exact cycle when interrupts are polled by an instruction (on the second-to-last cycle),
+	// the poll will not detect a pending NMI since the latch is updated after the polling...
+	// This is a side effect of sequential nature of emulation - on real hardware NMI level detection and interrupt polling
+	// are happening at the exact same time. As a result, pending NMI is detected at the same sycle the level detector activates.
+	// To compensate for this side effect, perform NMI level detection before the polling.
+	// 
+	// TODO: introduce something like "will_poll_interrupts: bool" to communicate that polling must be postponed until after
+	// the level detection? This will allow to avoid calling cpu_detect_nmi twice in the same cycle.
+	if !c.nmi_latch {
+		cpu_detect_nmi(c, b)
 	}
 
 	if c.nmi_latch {
@@ -207,8 +214,7 @@ cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
 	c.irq_latch = 
 		(b.apu.status >> 6) & 1 == 1 // APU Frame Counter
 
-	logf("NMI detected during polling: %t", c.nmi_latch)
-	logf("IRQ detected during polling: %t", c.irq_latch)
+	trace("interrupt polling: NMI %t, IRQ %t", c.nmi_latch, c.irq_latch)
 }
 
 cpu_tick_test_bus :: proc(cpu: ^CPU, bus: ^Test_CPU_Bus) {
@@ -234,7 +240,6 @@ cpu_tick :: proc {
 // Each instruction will individually command when its execution is done.
 // This is done to allow instructions to control for how many cycles they run.
 cpu_instruction_done :: proc(cpu: ^CPU) {
-	logf("CPU instruction done")
 	cpu.instruction = nil
 }
 
@@ -288,9 +293,11 @@ interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, is_brk: b
 		p.B = is_brk ? 1 : 0
 
 		stack_push(cpu, bus, byte(p))
-	
+
 		// Detect interrupt hijacking
 		if cpu.nmi_latch {
+			trace("interrupt hijacked by the NMI")
+
 			cpu.nmi_latch = false // Acknowledge the hijacking NMI
 			cpu.irq_latch = false // IRQ forgotten when NMI wins
 
@@ -312,7 +319,7 @@ interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, is_brk: b
 
 // Ephemeral "instruction" implementing the interrupt handling sequence
 Interrupt_Handler := Instruction{
-	mnemonic = "nmi/irq/brk",
+	mnemonic = "nmi/irq",
 	handler = proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 		interrupt_sequence_handler(cpu, bus, cycle, false)
 	}

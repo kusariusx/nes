@@ -123,6 +123,6 @@ tracking_allocator_report :: proc(track: mem.Tracking_Allocator) {
 }
 
 @(disabled=!ODIN_DEBUG) // Disabled when not in debug
-logf :: proc(format: string, args: ..any, loc := #caller_location) { // Short name because all components log using this
+trace :: proc(format: string, args: ..any, loc := #caller_location) {
 	log.debugf(format, ..args, location = loc)
 }
