@@ -1,5 +1,8 @@
 package main
 
+// IO bus decays to 0 after 3-30 milliseconds
+PPU_IO_BUS_DECAY_TIME :: 16129 // Approximately 3 milliseconds
+
 PPUCTRL_Bits :: bit_field u8 {
     NN: u8 | 2, // Base nametable address (0 = $2000; 1 = $2400; 2 = $2800; 3 = $2C00)
     I:  u8 | 1, // VRAM address increment per CPU read/write of PPUDATA (0: add 1, going across; 1: add 32, going down)
@@ -40,6 +43,7 @@ PPU :: struct {
 
     ppudata_read_buffer: u8,
     io_bus_value: u8,
+    io_bus_decay_counter: u16,
 
     oam: [256]u8, // Object Attribute Memory
     secondary_oam: [32]u8,
@@ -136,7 +140,8 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
         // Special handling for palette RAM - these reads are unbuffered
         if p.v >= 0x3F00 && p.v <= 0x3FFF {
             // Return unbuffered data
-            result = value
+            // Also, palette RAM holds 6-bit values and not 8-bit, so the high 2 bits are PPU open bus
+            result = (p.io_bus_value & 0xC0) | (value & 0x3F)
 
             // When reading palette memory, the internal buffer is not filled with palette data,
             // but with data "underneath" the palette memory in PPU address space - this is usually the 
@@ -154,14 +159,20 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
         p.v += p.PPUCTRL.I == 0 ? 1 : 32
 
         p.io_bus_value = result
+    case:
+        // Don't reset decay counter
+        return p.io_bus_value
     }
 
+    // We have loaded something onto the bus - reset decay counter
+    p.io_bus_decay_counter = PPU_IO_BUS_DECAY_TIME
     return p.io_bus_value
 }
 
 ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
     // Regardless of the register (even read-only), value is loaded onto the I/O bus
     p.io_bus_value = value
+    p.io_bus_decay_counter = PPU_IO_BUS_DECAY_TIME
 
     switch reg {
     case 0: // PPUCTRL
@@ -215,6 +226,14 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
 
 // PPU runs 3x faster than CPU, so for each CPU tick, we tick PPU 3 times
 ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
+    // Decay IO bus value
+    if p.io_bus_decay_counter > 0 {
+        p.io_bus_decay_counter -= 1
+        if p.io_bus_decay_counter == 0 {
+            p.io_bus_value = 0
+        }
+    }
+
     is_background_enabled := p.PPUMASK.b == 1
     is_sprite_enabled := p.PPUMASK.s == 1
     is_rendering_enabled := is_background_enabled || is_sprite_enabled

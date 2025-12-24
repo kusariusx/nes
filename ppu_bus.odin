@@ -19,8 +19,8 @@ ppu_bus_read :: proc(b: ^NES_PPU_Bus, address: u16) -> u8 {
     case 0x0000 ..= 0x3EFF: // This address space could be remapped by cardridge, try it
         value, mask := mapper_ppu_read(b.mapper, b.rom, address)
         if mask != 0 {
-            return value
-        } 
+            return value & mask
+        }
 
         // If cartridge did not handle this read, try to map to internal VRAM
         switch address {

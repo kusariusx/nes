@@ -35,8 +35,8 @@ nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16) -> u8 {
     res := (b.data_bus_value & ~mask) | (value & mask)
     
     // Address 0x4015 is special - all data read from APU status register is internal to the APU chip itself,
-    // so the data bus is not used. However, we still retain inactive bits from the data bus, but we do not update it
-    // with the value we've read.
+    // so the data bus is not used (or more precisely - APU's own bus is used instead). However, we still 
+    // retain inactive bits from the data bus, but we do not update it with the value we've read.
     if address != 0x4015 {
         b.data_bus_value = res
     }
