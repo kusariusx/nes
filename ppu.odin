@@ -107,7 +107,7 @@ PPU :: struct {
     will_set_vbl: bool,
 
     // Same purpose and reasoning as above, but to let CPU know the VBL has been cleared simultaneously during its tick.
-    will_clear_vbl: bool,
+    will_clear_ppustatus: bool,
 
     // Same as above, but to let CPU know that the concurrent PPU cycle is about to be skipped.
     will_skip_cycle: bool,
@@ -118,17 +118,25 @@ PPU :: struct {
 ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
     switch reg {
     case 2: // PPUSTATUS
-        value := u8(p.PPUSTATUS)
+        value := p.PPUSTATUS
+
+        if p.will_clear_ppustatus {
+            value.S = 0
+            value.O = 0
+
+            // Special case: don't clear VBL since CPU has to know its actual value even when it was cleared
+            // at the exact same cycle.
+        }
 
         // Reading PPUSTATUS has some side effects
         p.PPUSTATUS.V = 0
         p.w = 0
 
-        // Only bits 5-7 of the value are loaded onto the bus, others are left unchanged
-        p.io_bus_value = (p.io_bus_value & 0x1F) | (value & 0xE0)
-
         // Reading VBL suppresses setting it
         p.will_set_vbl = false
+
+        // Only bits 5-7 of the value are loaded onto the bus, others are left unchanged
+        p.io_bus_value = (p.io_bus_value & 0x1F) | (u8(value) & 0xE0)
     case 4: // OAMDATA
         // TODO: if OAMDATA is read during rendering, different values are returned (based on sprite evaluation state)
         p.io_bus_value = p.oam[p.OAMADDR]
@@ -562,7 +570,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
     // This is set AFTER we increment the cycle
     p.will_set_vbl = p.scanline == 241 && p.scanline_cycle == 1
-    p.will_clear_vbl = is_pre_render_scanline && p.scanline_cycle == 1
+    p.will_clear_ppustatus = is_pre_render_scanline && p.scanline_cycle == 1
 
     // Pre-render scanline varies in length, could be 341 or 340 cycles long.
     // All other scanlines are 341 cycles long.
