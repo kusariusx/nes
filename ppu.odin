@@ -47,6 +47,7 @@ PPU :: struct {
 
     oam: [256]u8, // Object Attribute Memory
     secondary_oam: [32]u8,
+    oam_corruption_seed: u8,
 
     // Internal PPU registers
     v: u16, // Current VRAM address (15 bits)
@@ -136,9 +137,6 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
         // Only bits 5-7 of the value are loaded onto the bus, others are left unchanged
         p.io_bus_value = (p.io_bus_value & 0x1F) | (u8(value) & 0xE0)
     case 4: // OAMDATA
-        // TODO: if OAMDATA is read during rendering, different values are returned (based on sprite evaluation state)
-        // This happens because OAMADDR is actually changing during sprite evaluation.
-
         is_rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
         is_visible_scanline := p.scanline >= 0 && p.scanline <= 239
         is_secondary_oam_clearing := p.scanline_cycle >= 1 && p.scanline_cycle < 64
@@ -200,6 +198,10 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
     p.io_bus_value = value
     p.io_bus_decay_counter = PPU_IO_BUS_DECAY_TIME
 
+    is_rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
+    is_visible_scanline := p.scanline >= 0 && p.scanline <= 239
+    is_visible_or_pre_render_scanline := is_visible_scanline || p.scanline == 261
+
     switch reg {
     case 0: // PPUCTRL
         p.PPUCTRL = PPUCTRL_Bits(value)
@@ -208,12 +210,16 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
         p.t = (p.t & 0xF3FF) | (u16(p.PPUCTRL.NN) << 10)
     case 1: // PPUMASK
         p.PPUMASK = PPUMASK_Bits(value)
+
+        new_is_rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
+
+        // Rendering was disabled during visible scanline - OAM corruption
+        if is_visible_scanline && is_rendering_enabled && !new_is_rendering_enabled { 
+            p.oam_corruption_seed = p.sprite_eval_secondary_oam_pos << 3
+        }
     case 3: // OAMADDR
         p.OAMADDR = value
     case 4: // OAMDATA
-        is_rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
-        is_visible_or_pre_render_scanline := (p.scanline >= 0 && p.scanline <= 239) || p.scanline == 261
-
         if is_rendering_enabled && is_visible_or_pre_render_scanline {
             // Hardware bug - OAM is not writable during visible and pre-render scanline, and also OAMADDR
             // is incorrectly incremented by 4.
@@ -295,6 +301,13 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
             is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
 
+            // Handle OAM corruption - copy 8 OAM bytes into the first 8 bytes of OAM. Target bytes are determind by the
+            // corruption "seed" set in case rendering is disabled during visible scanline.
+            if p.oam_corruption_seed != 0 {
+                copy(p.oam[p.oam_corruption_seed:p.oam_corruption_seed+8], p.oam[0:8])
+                p.oam_corruption_seed = 0
+            }
+
             // Sprite evaluation
             // Only happens on visible scanlines when rendering is enabled
             if is_visible_scanline {
@@ -323,16 +336,17 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
                 is_odd_cycle := p.scanline_cycle % 2 == 1
 
-                if p.scanline_cycle == 1 { // Sprite evaluation has just started, reset state
+                switch p.scanline_cycle {
+                case 1: // Sprite evaluation has just started, reset state
                     p.sprite_eval_sprite_byte = 0
                     p.sprite_eval_found = 0
                     p.sprite_eval_secondary_oam_pos = 0
                     p.sprite_eval_pending_reads = 0
                     p.sprite_eval_done = false
                     p.sprite_eval_sprite_0_present = false
-                }
 
-                switch p.scanline_cycle {
+                    // We still have some stuff to do on cycle 1
+                    fallthrough
                 case 1 ..= 64: // Secondary OAM clearing
                     if is_odd_cycle {
                         // Dummy read from OAM
@@ -340,9 +354,8 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         // we can probably just do nothing here?
                     } else {
                         // Write 0xFF to secondary OAM
-                        // Writes happen at cycles 2, 4, ..., 64 into positions 0, 1, ..., 31
-                        secondary_oam_pos := (p.scanline_cycle >> 1) - 1
-                        p.secondary_oam[secondary_oam_pos] = 0xFF
+                        p.secondary_oam[p.sprite_eval_secondary_oam_pos] = 0xFF
+                        p.sprite_eval_secondary_oam_pos = (p.sprite_eval_secondary_oam_pos + 1) & 0x1F
                     }
                 case 65 ..= 256: // Sprite evaluation
                     sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
@@ -419,7 +432,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         
                         if sprite_in_range {
                             p.sprite_eval_found += 1
-                            p.sprite_eval_secondary_oam_pos += 1 // Advance in the secondary OAM
+                            p.sprite_eval_secondary_oam_pos += 1
 
                             if p.scanline_cycle == 66 {
                                 p.sprite_eval_sprite_0_present = true
@@ -441,27 +454,37 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
             // Sprite fetching, happens on both visible scanlines and pre-render scanline
             switch p.scanline_cycle {
+            case 257:
+                p.sprite_eval_secondary_oam_pos = 0
+                fallthrough
             case 257 ..= 320:
-                sprite_idx := (p.scanline_cycle - 257) / 8
-                secondary_oam_pos := sprite_idx * 4
-
+                sprite_idx := p.sprite_eval_secondary_oam_pos >> 2
+                
                 // When we have less than 8 sprites on a scanline, we still perform all this fetches but discard
                 // those dummy sprites during rendering.
                 switch p.scanline_cycle % 8 {
                 case 1: // Read Y
-                    p.sprite_y_position = p.secondary_oam[secondary_oam_pos]
+                    p.sprite_y_position = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+                    p.sprite_eval_secondary_oam_pos += 1
                     ppu_fetch_nametable_byte(p, b) // Dummy nametable fetch (at cycles 1-2)
                 case 2: // Read tile number
-                    p.sprite_tile_number = p.secondary_oam[secondary_oam_pos + 1]
+                    p.sprite_tile_number = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+                    p.sprite_eval_secondary_oam_pos += 1
                 case 3: // Read attributes
-                    p.sprite_attributes[sprite_idx] = p.secondary_oam[secondary_oam_pos + 2]
+                    p.sprite_attributes[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+                    p.sprite_eval_secondary_oam_pos += 1
                     ppu_fetch_nametable_byte(p, b) // Dummy nametable fetch (at cycles 3-4)
                 case 4: // Read X
-                    p.sprite_x_position[sprite_idx] = p.secondary_oam[secondary_oam_pos + 3]
+                    p.sprite_x_position[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+
+                    // Not incrementing secondary OAM position because that would incorrectly increment sprite_idx
                 case 5: // Fetch pattern low (takes 2 cycles)
                     p.sprite_shifter_pattern_low[sprite_idx] = ppu_fetch_sprite_pattern_byte(p, b, sprite_idx, LOW)
                 case 7: // Fetch pattern high (takes 2 cycles)
                     p.sprite_shifter_pattern_high[sprite_idx] = ppu_fetch_sprite_pattern_byte(p, b, sprite_idx, HIGH)
+
+                    // After we are done with the current sprite, we can make a final increment
+                    p.sprite_eval_secondary_oam_pos += 1
                 }
 
                 // OAM address is reset on every cycle of sprite fetching
@@ -658,7 +681,7 @@ reverse_bits :: proc(n: u8) -> u8 {
     return result
 }
 
-ppu_fetch_sprite_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, sprite_idx: int, plane: u16) -> u8 {
+ppu_fetch_sprite_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, sprite_idx: u8, plane: u16) -> u8 {
     attributes := p.sprite_attributes[sprite_idx]
 
     // Mask with (sprite_height - 1) to keep the value within 0-7/0-15 range.
