@@ -308,6 +308,8 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
 
     is_odd_cycle := p.scanline_cycle % 2 == 1
+
+    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
    
     switch p.scanline {
     case 0 ..= 239, 261: // Visible scanlines and pre-render scanline
@@ -377,8 +379,6 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         p.sprite_eval_secondary_oam_pos = (p.sprite_eval_secondary_oam_pos + 1) & 0x1F
                     }
                 case 65 ..= 256: // Sprite evaluation
-                    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
-
                     if p.sprite_eval_done {
                         if is_odd_cycle {
                             // Dummy read n-th sprite from OAM
@@ -504,6 +504,20 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
                     // After we are done with the current sprite, we can make a final increment
                     p.sprite_eval_secondary_oam_pos += 1
+
+                    // Edge case - under some conditions it is possible to draw sprites on scanline 0, namely when sprites
+                    // are fetched during pre-render scanline and are in-range for scanline 261 & 0xFF = 5.
+                    if is_pre_render_scanline {
+                        sprite_y := int(p.sprite_y_position)
+                        sprite_in_range := 5 >= sprite_y && 5 < sprite_y + sprite_height
+
+                        if !sprite_in_range { // Clear stale pattern data - sprite should not be drawn
+                            p.sprite_shifter_pattern_low[sprite_idx] = 0
+                            p.sprite_shifter_pattern_high[sprite_idx] = 0
+                        } else if sprite_idx == 0 {
+                            p.sprite_0_on_current_scanline = true
+                        }
+                    }
                 }
 
                 // OAM address is reset on every cycle of sprite fetching
@@ -650,9 +664,9 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     p.will_set_vbl = p.scanline == 241 && p.scanline_cycle == 1
     p.will_clear_ppustatus = is_pre_render_scanline && p.scanline_cycle == 1
 
-    // Pre-render scanline varies in length, could be 341 or 340 cycles long.
-    // All other scanlines are 341 cycles long.
-    p.will_skip_cycle = is_pre_render_scanline && p.scanline_cycle == 339 && p.is_odd_frame && p.is_rendering_enabled
+    // Pre-render scanline varies in length, could be 341 or 340 cycles long. All other scanlines are 341 cycles long.
+    // Note: skipping condition does not depend on delayed rendering toggle, but on actual values in PPUMASK.
+    p.will_skip_cycle = is_pre_render_scanline && p.scanline_cycle == 339 && p.is_odd_frame && (p.PPUMASK.s == 1 || p.PPUMASK.b == 1)
     
     if p.scanline_cycle == 341 { // Scanline is completed
         p.scanline_cycle = 0
