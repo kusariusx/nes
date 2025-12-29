@@ -3,6 +3,10 @@ package main
 // IO bus decays to 0 after 3-30 milliseconds
 PPU_IO_BUS_DECAY_TIME :: 16129 // Approximately 3 milliseconds
 
+// Rendering is not enabled/disabled immediately after writing to PPUMASK - the effect is delayed by 3-4 cycles.
+// Chose 4 to be able to pass some obscure PPU tests, but most of the software does not rely on this delay.
+PPU_RENDERING_TOGGLE_DELAY :: 4
+
 PPUCTRL_Bits :: bit_field u8 {
     NN: u8 | 2, // Base nametable address (0 = $2000; 1 = $2400; 2 = $2800; 3 = $2C00)
     I:  u8 | 1, // VRAM address increment per CPU read/write of PPUDATA (0: add 1, going across; 1: add 32, going down)
@@ -40,6 +44,9 @@ PPU :: struct {
     PPUSCROLL: u8, // X and Y scroll (first write - X, second write - Y) 
     PPUADDR:   u8, // VRAM address (14-bit value, bits 8-13 on first write, bits 0-7 on second write)
     PPUDATA:   u8,
+
+    is_rendering_enabled: bool,
+    rendering_toggle_delay: u8,
 
     ppudata_read_buffer: u8,
     io_bus_value: u8,
@@ -137,7 +144,6 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
         // Only bits 5-7 of the value are loaded onto the bus, others are left unchanged
         p.io_bus_value = (p.io_bus_value & 0x1F) | (u8(value) & 0xE0)
     case 4: // OAMDATA
-        is_rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
         is_visible_scanline := p.scanline >= 0 && p.scanline <= 239
         is_secondary_oam_clearing := p.scanline_cycle >= 1 && p.scanline_cycle < 64
         is_sprite_fetching := p.scanline_cycle >= 257 && p.scanline <= 320
@@ -146,7 +152,7 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
         // with special flag causing reads to always return 0xFF, and writing this value to secondary OAM), 
         // all OAM reads return 0xFF while secondary OAM is being actively cleared.
         // Additionally, reads during sprite fetching also return 0xFF.
-        if is_visible_scanline && is_rendering_enabled && (is_secondary_oam_clearing || is_sprite_fetching) {
+        if p.is_rendering_enabled && is_visible_scanline && (is_secondary_oam_clearing || is_sprite_fetching) {
             p.io_bus_value = 0xFF
             break
         }
@@ -198,7 +204,6 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
     p.io_bus_value = value
     p.io_bus_decay_counter = PPU_IO_BUS_DECAY_TIME
 
-    is_rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
     is_visible_scanline := p.scanline >= 0 && p.scanline <= 239
     is_visible_or_pre_render_scanline := is_visible_scanline || p.scanline == 261
 
@@ -214,13 +219,18 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
         new_is_rendering_enabled := p.PPUMASK.b == 1 || p.PPUMASK.s == 1
 
         // Rendering was disabled during visible scanline - OAM corruption
-        if is_visible_scanline && is_rendering_enabled && !new_is_rendering_enabled { 
+        if is_visible_scanline && p.is_rendering_enabled && !new_is_rendering_enabled { 
             p.oam_corruption_seed = p.sprite_eval_secondary_oam_pos << 3
+        }
+
+        // Rendering was toggled
+        if p.is_rendering_enabled != new_is_rendering_enabled {
+            p.rendering_toggle_delay = PPU_RENDERING_TOGGLE_DELAY
         }
     case 3: // OAMADDR
         p.OAMADDR = value
     case 4: // OAMDATA
-        if is_rendering_enabled && is_visible_or_pre_render_scanline {
+        if p.is_rendering_enabled && is_visible_or_pre_render_scanline {
             // Hardware bug - OAM is not writable during visible and pre-render scanline, and also OAMADDR
             // is incorrectly incremented by 4.
             p.OAMADDR = (p.OAMADDR + 4) & 0xFC
@@ -267,7 +277,7 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
 
 // PPU runs 3x faster than CPU, so for each CPU tick, we tick PPU 3 times
 ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
-    // Decay IO bus value
+    // Handle IO bus value decay
     if p.io_bus_decay_counter > 0 {
         p.io_bus_decay_counter -= 1
         if p.io_bus_decay_counter == 0 {
@@ -275,16 +285,29 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
         }
     }
 
+    // Handle delayed rendering toggle
+    if p.rendering_toggle_delay > 0 {
+        p.rendering_toggle_delay -= 1
+        if p.rendering_toggle_delay == 0 {
+            p.is_rendering_enabled = !p.is_rendering_enabled
+        }
+    }
+
+    // Handle skipped cycle
+    if p.will_skip_cycle {
+        p.scanline_cycle += 1
+    }
+
     is_background_enabled := p.PPUMASK.b == 1
     is_sprite_enabled := p.PPUMASK.s == 1
-    is_rendering_enabled := is_background_enabled || is_sprite_enabled
 
     is_pre_render_scanline := p.scanline == 261
     is_visible_scanline := !is_pre_render_scanline
 
-    if p.will_skip_cycle {
-        p.scanline_cycle += 1
-    }
+    is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
+    is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
+
+    is_odd_cycle := p.scanline_cycle % 2 == 1
    
     switch p.scanline {
     case 0 ..= 239, 261: // Visible scanlines and pre-render scanline
@@ -297,13 +320,11 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             p.PPUSTATUS.O = 0
         }
 
-        if is_rendering_enabled {
-            is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
-            is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
-
+        if p.is_rendering_enabled {
             // Handle OAM corruption - copy 8 OAM bytes into the first 8 bytes of OAM. Target bytes are determind by the
-            // corruption "seed" set in case rendering is disabled during visible scanline.
-            if p.oam_corruption_seed != 0 {
+            // corruption "seed" set when rendering is disabled during visible scanline.
+            // Corruption happens when rendering is "really" enabled and not in "pending toggle" state.
+            if p.oam_corruption_seed != 0 && p.rendering_toggle_delay == 0 {
                 copy(p.oam[p.oam_corruption_seed:p.oam_corruption_seed+8], p.oam[0:8])
                 p.oam_corruption_seed = 0
             }
@@ -333,8 +354,6 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         p.sprite_eval_sprite_byte += 1
                     }
                 }
-
-                is_odd_cycle := p.scanline_cycle % 2 == 1
 
                 switch p.scanline_cycle {
                 case 1: // Sprite evaluation has just started, reset state
@@ -543,13 +562,6 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                     }
                 }
 
-                // Decrement sprite X counters
-                for i in 0 ..< 8 {
-                    if p.sprite_x_position[i] > 0 {
-                        p.sprite_x_position[i] -= 1
-                    }
-                }
-
                 // Determine what pixel to draw
                 if (sprite_color != 0 && sprite_priority == 0) || background_color == 0 { // Sprite pixel wins
                     color, palette = u16(sprite_color), u16(sprite_palette)
@@ -614,6 +626,15 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 ppu_transfer_y(p)
             }
         }
+
+        // Decrement sprite X counters - this happens even when rendering is disabled
+        if is_visible_scanline && is_rendering_cycle {
+            for i in 0 ..< 8 {
+                if p.sprite_x_position[i] > 0 {
+                    p.sprite_x_position[i] -= 1
+                }
+            }
+        }
     case 240: // Post-render scanline
         // PPU is idle during this scanline
     case 241 ..= 260: // VBlank scanlines
@@ -631,7 +652,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
     // Pre-render scanline varies in length, could be 341 or 340 cycles long.
     // All other scanlines are 341 cycles long.
-    p.will_skip_cycle = is_pre_render_scanline && p.scanline_cycle == 339 && p.is_odd_frame && is_rendering_enabled
+    p.will_skip_cycle = is_pre_render_scanline && p.scanline_cycle == 339 && p.is_odd_frame && p.is_rendering_enabled
     
     if p.scanline_cycle == 341 { // Scanline is completed
         p.scanline_cycle = 0
@@ -824,10 +845,16 @@ ppu_load_shifters :: proc(p: ^PPU) {
 }
 
 ppu_shift_registers :: proc(p: ^PPU) {
+    // For high bitplane of background pattern, 1 is shifted into the low bit of the shifter, instead of 0.
+    // Usually, these 1's are overwritten with tile data when shifters are loaded every 8 cycles. But, if
+    // rendering is disabled and enabled at some very precise moments (disable before load, enable right after load), 
+    // it is possible to skip loading shifters with fresh tile data, and these 1's could potentially be rendered
+    // on the screen, and even cause sprite 0 hit.
+    p.bg_shifter_pattern_high = (p.bg_shifter_pattern_high << 1) | 1
+
     p.bg_shifter_pattern_low  <<= 1
-    p.bg_shifter_pattern_high <<= 1
-    p.bg_shifter_palette_low  <<= 1
     p.bg_shifter_palette_high <<= 1
+    p.bg_shifter_palette_low  <<= 1
 }
 
 ppu_get_background_pixel :: proc(p: ^PPU) -> (color: u16, palette: u16) {
