@@ -507,6 +507,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
                     // Edge case - under some conditions it is possible to draw sprites on scanline 0, namely when sprites
                     // are fetched during pre-render scanline and are in-range for scanline 261 & 0xFF = 5.
+                    // So, check whether sprite is in range, and replace its pattern with transparent data in case it isn't.
                     if is_pre_render_scanline {
                         sprite_y := int(p.sprite_y_position)
                         sprite_in_range := 5 >= sprite_y && 5 < sprite_y + sprite_height
@@ -514,8 +515,10 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         if !sprite_in_range { // Clear stale pattern data - sprite should not be drawn
                             p.sprite_shifter_pattern_low[sprite_idx] = 0
                             p.sprite_shifter_pattern_high[sprite_idx] = 0
-                        } else if sprite_idx == 0 {
-                            p.sprite_0_on_current_scanline = true
+
+                            if sprite_idx == 0 { // In case we accidentally triggered a sprite 0 hit
+                                p.sprite_0_on_current_scanline = false
+                            }
                         }
                     }
                 }
@@ -627,13 +630,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
                 // After sprite evaluation and rendering, remember sprite 0 presense to be able 
                 // to detect sprite 0 hit on the next scanline.
-                if is_visible_scanline {
-                    p.sprite_0_on_current_scanline = p.sprite_eval_sprite_0_present
-                } else {
-                    // On pre-render scanline, no evaluation happens, so sprite_eval_sprite_0_present
-                    // contains stale data from scanline 239. Reset it to avoid accidentally passing it on to the next frame.
-                    p.sprite_0_on_current_scanline = false
-                }
+                p.sprite_0_on_current_scanline = p.sprite_eval_sprite_0_present
             }
             
             if is_pre_render_scanline && p.scanline_cycle >= 280 && p.scanline_cycle <= 304 {
@@ -864,6 +861,9 @@ ppu_shift_registers :: proc(p: ^PPU) {
     // rendering is disabled and enabled at some very precise moments (disable before load, enable right after load), 
     // it is possible to skip loading shifters with fresh tile data, and these 1's could potentially be rendered
     // on the screen, and even cause sprite 0 hit.
+    //
+    // TODO: AccuracyCoin's "BG Serial In" test is flaky with current implementation. Probably something with 
+    // rendering toggle latency, or with how 1's are shifted into BG, or with how BG shifters are loaded.
     p.bg_shifter_pattern_high = (p.bg_shifter_pattern_high << 1) | 1
 
     p.bg_shifter_pattern_low  <<= 1
