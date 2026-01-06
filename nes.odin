@@ -105,11 +105,7 @@ nes_tick :: proc(nes: ^NES) {
     ppu_tick(nes.ppu, nes.ppu_bus)
     ppu_tick(nes.ppu, nes.ppu_bus)
 
-    // Tick APU every other CPU cycle
-    if nes.cpu.is_read_cycle {
-        apu_tick(nes.apu)
-    }
-
+    apu_tick(nes.apu)
     cpu_tick(nes.cpu, nes.cpu_bus)
 }
 

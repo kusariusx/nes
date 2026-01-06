@@ -212,7 +212,7 @@ cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
 	// IRQs can have various sources - they are all connected to the same IRQ line, being effectively OR'ed.
 	// IRQ line will stay low/active until all interrupt sources acknowledge their interrupt.
 	c.irq_latch = 
-		(b.apu.status >> 6) & 1 == 1 // APU Frame Counter
+		b.apu.status.frame_interrupt == 1 // APU Frame Counter
 
 	trace("interrupt polling: NMI %t, IRQ %t", c.nmi_latch, c.irq_latch)
 }
