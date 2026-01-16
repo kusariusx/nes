@@ -77,6 +77,64 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	// Alternate between read and write cycles
 	cpu.is_read_cycle = !cpu.is_read_cycle
 
+	// Handle DMC DMA
+	if bus.apu.dmc_dma_cycle > 0 {
+		trace_apu("DMC DMA cycle, CPU halted")
+
+		bus.apu.dmc_dma_cycle -= 1
+		if bus.apu.dmc_dma_cycle == 0 {
+			trace_apu("DMC DMA last cycle")
+
+			bus.apu.dmc_sample_buffer = cpu_bus_read(bus, bus.apu.dmc_current_address)
+			bus.apu.dmc_sample_buffer_is_empty = false
+
+			trace_apu("DMC DMA read byte %02X from address %04X", bus.apu.dmc_sample_buffer, bus.apu.dmc_current_address)
+
+			if bus.apu.dmc_current_address == 0xFFFF {
+				trace_apu("wrapping DMC current address to 8000")
+				bus.apu.dmc_current_address = 0x8000
+			} else {
+				bus.apu.dmc_current_address += 1
+			}
+
+			bus.apu.dmc_bytes_remaining -= 1
+			if bus.apu.dmc_bytes_remaining == 0  {
+				trace_apu("after DMC DMA, bytes remaining is 0")
+
+				if bus.apu.dmc_flags & 0b01000000 == 0 { // No loop, assert IRQ if enabled
+					trace_apu("no loop")
+
+					if bus.apu.dmc_flags & 0b10000000 != 0 {
+						trace_apu("asserting DMC IRQ")
+
+						bus.apu.status.dmc_interrupt = 1
+					}
+				} else { // Loop
+					trace_apu("loop, restarting sample")
+
+					bus.apu.dmc_current_address = bus.apu.dmc_sample_address
+					bus.apu.dmc_bytes_remaining = bus.apu.dmc_sample_length
+				}
+			}
+		}
+
+		return
+	}
+
+	if bus.apu.dmc_dma_pending && cpu.is_read_cycle == bus.apu.dmc_dma_halt_on_read {
+		trace_apu("starting DMC DMA, halting CPU on read cycle = %v", bus.apu.dmc_dma_halt_on_read)
+
+		bus.apu.dmc_dma_pending = false
+		
+		if bus.apu.dmc_dma_halt_on_read { // Load DMA
+			bus.apu.dmc_dma_cycle = 2
+		} else {
+			bus.apu.dmc_dma_cycle = 3
+		}
+
+		return
+	}
+
 	// Handle OAM DMA
 	if bus.oam_dma_pending {
 		// Dummy read during alignment cycle
@@ -212,7 +270,8 @@ cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
 	// IRQs can have various sources - they are all connected to the same IRQ line, being effectively OR'ed.
 	// IRQ line will stay low/active until all interrupt sources acknowledge their interrupt.
 	c.irq_latch = 
-		b.apu.status.frame_interrupt == 1 // APU Frame Counter
+		b.apu.status.frame_interrupt == 1 || // APU Frame Counter
+		b.apu.status.dmc_interrupt == 1 // APU DMC
 
 	trace("interrupt polling: NMI %t, IRQ %t", c.nmi_latch, c.irq_latch)
 }

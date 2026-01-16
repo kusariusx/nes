@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:os"
@@ -59,6 +60,20 @@ main :: proc() {
 	nes_mappings[.V] = #partial {.Down = proc(nes: ^NES) { 
 		if nes.breakpoint {
 			nes_debug_run_cpu_instruction(nes) 
+		}
+	}}
+	// TODO: remove this after testing is done
+	nes_mappings[.P] = #partial {.Down = proc(nes: ^NES) { 
+		buf: [0xFF]byte
+		for i in u16(0) ..< 0xFF {
+			buf[i] = cpu_bus_read(nes.cpu_bus, 0x500 + i)
+		}
+
+		for i in 0 ..< 4 {
+			for j in 0 ..< 32 {
+				fmt.printf("$%02X, ", buf[i*32 + j])
+			}
+			fmt.printf("\n")
 		}
 	}}
 	defer delete(nes_mappings)
@@ -122,7 +137,13 @@ tracking_allocator_report :: proc(track: mem.Tracking_Allocator) {
 	}
 }
 
+// TODO: refactor tracing to use a single procedure
 @(disabled=!ODIN_DEBUG) // Disabled when not in debug
 trace :: proc(format: string, args: ..any, loc := #caller_location) {
+	//log.debugf(format, ..args, location = loc)
+}
+
+@(disabled=!ODIN_DEBUG)
+trace_apu :: proc(format: string, args: ..any, loc := #caller_location) {
 	log.debugf(format, ..args, location = loc)
 }
