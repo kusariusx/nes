@@ -28,6 +28,8 @@ APU :: struct {
     dmc_dma_active: bool,
     dmc_dma_cycle: u8,
 
+    dmc_toggle_delay: u8,
+    dmc_toggle_pending_value: u8,
     dmc_flags: u8,
     dmc_rate: u16, // Remember the rate instead of decoding it from rate index every time we need it
     dmc_rate_counter: u16,
@@ -91,27 +93,15 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
     case 0x4015: // Status
         trace_apu("4015 write, writing %v", value)
 
-        a.status = APU_Status_Bits(value)
+        status := APU_Status_Bits(value)
 
-        a.status.dmc_interrupt = 0
+        a.dmc_toggle_pending_value = status.dmc
+        a.dmc_toggle_delay = 2
+        status.dmc = a.status.dmc // Preserve original bit
 
-        if a.status.dmc == 0 {
-            a.dmc_bytes_remaining = 0
-        } else if a.dmc_bytes_remaining == 0 {
-            trace_apu("restarting sample on 4015 write")
+        status.dmc_interrupt = 0
 
-            a.dmc_current_address = a.dmc_sample_address
-            a.dmc_bytes_remaining = a.dmc_sample_length
-
-            // Request first sample immediately
-            // Load DMA - halt CPU on read cycle
-            if a.dmc_sample_buffer_is_empty {
-                trace_apu("requesting load DMA on 4015 write")
-
-                a.dmc_dma_pending = true
-                a.dmc_dma_halt_on_read = true
-            }
-        }
+        a.status = status
     case 0x4017: // Frame counter
         a.frame_counter_flags = value
         a.reset_frame_counter_delay = 3
@@ -177,8 +167,34 @@ apu_tick :: proc(a: ^APU) {
 
     a.dmc_rate_counter -= 1
 
-    // Frame counter
+    // Things that need to happen "every APU cycle" (every other cycle)
     if a.is_read_cycle {
+        // Delayed DMC toggle
+        if a.dmc_toggle_delay > 0 {
+            a.dmc_toggle_delay -= 1
+            if a.dmc_toggle_delay == 0 {
+                a.status.dmc = a.dmc_toggle_pending_value
+
+                if a.status.dmc == 0 {
+                    a.dmc_bytes_remaining = 0
+                } else if a.dmc_bytes_remaining == 0 {
+                    trace_apu("restarting sample")
+        
+                    a.dmc_current_address = a.dmc_sample_address
+                    a.dmc_bytes_remaining = a.dmc_sample_length
+        
+                    // Request first sample immediately
+                    // Load DMA - halt CPU on read cycle
+                    if a.dmc_sample_buffer_is_empty {
+                        trace_apu("requesting load DMA")
+        
+                        a.dmc_dma_pending = true
+                        a.dmc_dma_halt_on_read = true
+                    }
+                }
+            }
+        }
+
         if a.will_clear_frame_interrupt || frame_counter_interrupt_inhibit == 1 {
             a.status.frame_interrupt = 0
             a.will_clear_frame_interrupt = false
@@ -194,6 +210,7 @@ apu_tick :: proc(a: ^APU) {
         a.frame_counter += 1
     }
 
+    // Frame counter
     switch a.frame_counter {
     case 3728:
     case 7456:
