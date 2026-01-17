@@ -410,9 +410,13 @@ jsr :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Jump to Subroutine
     case 3:
         // Internal operation - dummy read the stack
         cpu_bus_read(bus, STACK_START + u16(cpu.S))
+
+        cpu.will_write = true
     case 4:
         // Push PCH on stack
         stack_push(cpu, bus, cpu.PCH)
+
+        cpu.will_write = true
     case 5:
         // Push PCL on stack
         stack_push(cpu, bus, cpu.PCL)
@@ -596,6 +600,8 @@ pha :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Push A
         cpu_bus_read(bus, cpu.PC)
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 3:
         // Push A on stack, done
         stack_push(cpu, bus, cpu.A)
@@ -610,6 +616,8 @@ php :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Push P
         cpu_bus_read(bus, cpu.PC)
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 3:
         // Push P on stack with B flag set, done
         p := cpu.P

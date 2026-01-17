@@ -13,6 +13,7 @@ NES_CPU_Bus :: struct {
 
     io: ^IO,
 
+    oam_dma_perform_alignment_cycle: bool,
     oam_dma_pending: bool,
     oam_dma_active: bool,
     oam_dma_address: u16,

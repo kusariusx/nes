@@ -24,6 +24,8 @@ APU :: struct {
     reset_frame_counter_delay: u8,
 
     dmc_dma_pending: bool,
+    dmc_dma_halt_pending: bool,
+    dmc_dma_dummy_read_address: u16,
     dmc_dma_halt_on_read: bool, // false means halt on write
     dmc_dma_active: bool,
     dmc_dma_cycle: u8,

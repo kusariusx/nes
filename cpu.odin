@@ -54,6 +54,11 @@ CPU :: struct {
 	// To control DMA cadence - DMAs can only start on read cycles. If they start on write cycles, they wait.
 	is_read_cycle: bool,
 
+	// Indicates that the CPU will write to the bus on the next cycle - used to determine when to start DMC DMA.
+	// DMC DMA cannot halt the CPU on the cycle when it writes to the bus. In such case, DMC DMA waits and tries to 
+	// halt the CPU on the next cycle.
+	will_write: bool,
+
 	// Registers
 	A:                   byte, // Accumulator
 	X, Y:                byte, // Indexing registers
@@ -77,68 +82,56 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	// Alternate between read and write cycles
 	cpu.is_read_cycle = !cpu.is_read_cycle
 
+	dmc_dma_dummy_read, oam_dma_dummy_read: bool
+	dmc_dma_action, oam_dma_action: bool
+
 	// Handle DMC DMA
-	if bus.apu.dmc_dma_cycle > 0 {
-		trace_apu("DMC DMA cycle, CPU halted")
-
+	if bus.apu.dmc_dma_cycle > 0 && !bus.apu.dmc_dma_halt_pending {
 		bus.apu.dmc_dma_cycle -= 1
+
 		if bus.apu.dmc_dma_cycle == 0 {
-			trace_apu("DMC DMA last cycle")
-
-			bus.apu.dmc_sample_buffer = cpu_bus_read(bus, bus.apu.dmc_current_address)
-			bus.apu.dmc_sample_buffer_is_empty = false
-
-			trace_apu("DMC DMA read byte %02X from address %04X", bus.apu.dmc_sample_buffer, bus.apu.dmc_current_address)
-
-			if bus.apu.dmc_current_address == 0xFFFF {
-				trace_apu("wrapping DMC current address to 8000")
-				bus.apu.dmc_current_address = 0x8000
-			} else {
-				bus.apu.dmc_current_address += 1
-			}
-
-			bus.apu.dmc_bytes_remaining -= 1
-			if bus.apu.dmc_bytes_remaining == 0  {
-				trace_apu("after DMC DMA, bytes remaining is 0")
-
-				if bus.apu.dmc_flags & 0b01000000 == 0 { // No loop, assert IRQ if enabled
-					trace_apu("no loop")
-
-					if bus.apu.dmc_flags & 0b10000000 != 0 {
-						trace_apu("asserting DMC IRQ")
-
-						bus.apu.status.dmc_interrupt = 1
-					}
-				} else { // Loop
-					trace_apu("loop, restarting sample")
-
-					bus.apu.dmc_current_address = bus.apu.dmc_sample_address
-					bus.apu.dmc_bytes_remaining = bus.apu.dmc_sample_length
-				}
-			}
+			dmc_dma_action = true
+		} else {
+			dmc_dma_dummy_read = true
 		}
-
-		return
 	}
 
 	if bus.apu.dmc_dma_pending && cpu.is_read_cycle == bus.apu.dmc_dma_halt_on_read {
-		trace_apu("starting DMC DMA, halting CPU on read cycle = %v", bus.apu.dmc_dma_halt_on_read)
-
 		bus.apu.dmc_dma_pending = false
+		bus.apu.dmc_dma_halt_pending = true
 		
 		if bus.apu.dmc_dma_halt_on_read { // Load DMA
 			bus.apu.dmc_dma_cycle = 2
-		} else {
+		} else { // Reload DMA
 			bus.apu.dmc_dma_cycle = 3
 		}
+	}
 
-		return
+	if bus.apu.dmc_dma_halt_pending && !cpu.will_write {
+		bus.apu.dmc_dma_halt_pending = false
+
+		// TODO: again, this is a hack because I don't properly emulate the address bus
+		if cpu.instruction == nil { // If we're at instruction start, the CPU was about to fetch opcode from PC
+			bus.apu.dmc_dma_dummy_read_address = cpu.PC
+		} else { // Mid-instruction, use the last known operand address
+			bus.apu.dmc_dma_dummy_read_address = cpu.instruction_operands.whole
+		}
+
+		dmc_dma_dummy_read = true
 	}
 
 	// Handle OAM DMA
+	if bus.oam_dma_active {
+		if bus.oam_dma_perform_alignment_cycle {
+			bus.oam_dma_perform_alignment_cycle = false
+			oam_dma_dummy_read = true
+		} else {
+			oam_dma_action = true
+		}
+	}
+
 	if bus.oam_dma_pending {
-		// Dummy read during alignment cycle
-		cpu_bus_read(bus, cpu.PC)
+		oam_dma_dummy_read = true
 
 		// We should wait for either 2 or 1 cycles depending on whether this is a read or a write cycle
 		if cpu.is_read_cycle {
@@ -148,20 +141,76 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 			bus.oam_dma_pending = false
 			bus.oam_dma_active = true // DMA will start on the next (read) cycle
 		}
-
-		return
 	}
 
-	if bus.oam_dma_active {
-		if cpu.is_read_cycle { // Read from page
-			bus.oam_dma_data = cpu_bus_read(bus, bus.oam_dma_address)
-		} else { // Write to OAMDATA
-			cpu_bus_write(bus, OAMDATA_ADDRESS, bus.oam_dma_data)
+	if dmc_dma_dummy_read || dmc_dma_action || oam_dma_dummy_read || oam_dma_action { // We have some pending DMA work
+		/* 
+		Since there are 4 flags, there are 16 possible states, but some of them as impossible by design. For example,
+		it is not possible for both OAM DMA action and OAM DMA dummy read to be pending at the same time. After excluding 
+		such impossible cases, we end up with 8 possible scenarios:
+		
+		dmc_dma_dummy_read	dmc_dma_action	oam_dma_dummy_read	oam_dma_action	What to do
+		0					0				0					1				Perform OAM action
+		0					0				1					0				Perform OAM dummy read
+		0					1				0					0				Perform DMC action
+		0					1				0					1				Perform DMC action and request alignment cycle for OAM
+		0					1				1					0				Not possible?
+		1					0				0					0				Perform DMC dummy read
+		1					0				0					1				Perform OAM action and DMC dummy read (don't actually read the bus but advance counters)
+		1					0				1					0				Perform DMC dummy read and OAM dummy read (which one exactly?)
+		*/
 
-			if bus.oam_dma_address & 0x00FF == 0xFF { // We've just wrote the last byte (reached page end)
-				bus.oam_dma_active = false
-			} else { // We still have data remaining
-				bus.oam_dma_address += 1
+		if dmc_dma_action {
+			// Perform DMC DMA action
+			bus.apu.dmc_sample_buffer = cpu_bus_read(bus, bus.apu.dmc_current_address)
+			bus.apu.dmc_sample_buffer_is_empty = false
+
+			if bus.apu.dmc_current_address == 0xFFFF {
+				bus.apu.dmc_current_address = 0x8000
+			} else {
+				bus.apu.dmc_current_address += 1
+			}
+
+			bus.apu.dmc_bytes_remaining -= 1
+			if bus.apu.dmc_bytes_remaining == 0  {
+				if bus.apu.dmc_flags & 0b01000000 == 0 { // No loop, assert IRQ if enabled
+					if bus.apu.dmc_flags & 0b10000000 != 0 {
+						bus.apu.status.dmc_interrupt = 1
+					}
+				} else { // Loop
+					bus.apu.dmc_current_address = bus.apu.dmc_sample_address
+					bus.apu.dmc_bytes_remaining = bus.apu.dmc_sample_length
+				}
+			}
+
+			if oam_dma_action {
+				// Request dummy read cycle for OAM DMA
+				bus.oam_dma_perform_alignment_cycle = true
+			}
+		} else if oam_dma_action {
+			// Perform OAM DMA action
+			if cpu.is_read_cycle { // Read from page
+				bus.oam_dma_data = cpu_bus_read(bus, bus.oam_dma_address)
+			} else { // Write to OAMDATA
+				cpu_bus_write(bus, OAMDATA_ADDRESS, bus.oam_dma_data)
+	
+				if bus.oam_dma_address & 0x00FF == 0xFF { // We've just wrote the last byte (reached page end)
+					bus.oam_dma_active = false
+				} else { // We still have data remaining
+					bus.oam_dma_address += 1
+				}
+			}
+		} else { 
+			if dmc_dma_dummy_read && oam_dma_dummy_read {
+				// TODO: we want both dummy reads, decide which one to perform
+			}
+
+			if dmc_dma_dummy_read {
+				// Perform DMC DMA dummy read
+				cpu_bus_read(bus, bus.apu.dmc_dma_dummy_read_address)
+			} else if oam_dma_dummy_read {
+				// Perform OAM DMA dummy read
+				cpu_bus_read(bus, cpu.PC)
 			}
 		}
 
@@ -218,6 +267,8 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		cpu.PC, u8(cpu.P), cpu.S, cpu.A, cpu.X, cpu.Y,
 		cpu.instruction_cycle, cpu.instruction.mnemonic,
 	)
+
+	cpu.will_write = false
 	
 	// Most instructions don't have special handling for the 1-st cycle (almost all instruction handlers
 	// start their cycle switch from 2), but some instructions need to have additional logic at cycle 1 for 
@@ -340,12 +391,18 @@ interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, is_brk: b
 		if is_brk {
 			cpu.PC += 1
 		}
+
+		cpu.will_write = true // Stack pushes write to the bus
 	case 3:
 		// Push PCH on the stack
 		stack_push(cpu, bus, cpu.PCH)
+
+		cpu.will_write = true
 	case 4:
 		// Push PCL on the stack
 		stack_push(cpu, bus, cpu.PCL)
+
+		cpu.will_write = true
 	case 5:
 		// Push P on the stack (with B flag clear)
 		p := cpu.P

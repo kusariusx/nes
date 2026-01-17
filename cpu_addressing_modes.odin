@@ -200,12 +200,15 @@ zpg_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(c
     case 3:
         // Read from effective address
         cpu.instruction_temp_value = cpu_bus_read(bus, u16(cpu.instruction_operand))
+
+        cpu.will_write = true
     case 4:
         // Dummy write the value back to effective address, perform action
         cpu_bus_write(bus, u16(cpu.instruction_operand), cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
 
         cpu_poll_interrupts(cpu, bus)
+        cpu.will_write = true
     case 5:
         // Write the new value to effective address, done
         cpu_bus_write(bus, u16(cpu.instruction_operand), cpu.instruction_temp_value)
@@ -227,12 +230,16 @@ zpgi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_registe
     case 4:    
         // Read from effective address
         cpu.instruction_temp_value = cpu_bus_read(bus, u16(cpu.instruction_operand))
+        
+        cpu.will_write = true
     case 5:
         // Dummy write the back to effective address, perform action
         cpu_bus_write(bus, u16(cpu.instruction_operand), cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
 
         cpu_poll_interrupts(cpu, bus)
+        
+        cpu.will_write = true
     case 6:
         // Write the new value to effective address, done
         cpu_bus_write(bus, u16(cpu.instruction_operand), cpu.instruction_temp_value)
@@ -254,12 +261,16 @@ abs_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(c
     case 4:    
         // Read from effective address
         cpu.instruction_temp_value = cpu_bus_read(bus, cpu.instruction_operands.whole)
+
+        cpu.will_write = true
     case 5:
         // Dummy write the value back to effective address, perform action
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 6:
         // Write the new value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
@@ -289,12 +300,16 @@ absi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_registe
     case 5:
         // Re-read from effective address
         cpu.instruction_temp_value = cpu_bus_read(bus, cpu.instruction_operands.whole)
+
+        cpu.will_write = true
     case 6:
         // Dummy write the value back to effective address, perform action
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 7:
         // Write the new value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
@@ -372,6 +387,8 @@ zpg_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
         cpu.PC += 1
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 3:
         // Write value to effective address, done
         cpu_bus_write(bus, u16(cpu.instruction_operand), value)
@@ -392,6 +409,8 @@ zpgi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value
         cpu.instruction_operand += index_register
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 4:    
         // Write value to effective address, done
         cpu_bus_write(bus, u16(cpu.instruction_operand), value)
@@ -412,6 +431,8 @@ abs_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
         cpu.PC += 1
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 4:    
         // Write value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, value)
@@ -440,6 +461,8 @@ absi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value
         }
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 5:
         // Write value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, value)
@@ -466,6 +489,8 @@ indx_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, u16(cpu.instruction_operand+1))
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 6:
         // Write value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, value)
@@ -496,6 +521,8 @@ indy_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
         }
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 6:
         // Write value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, value)
@@ -523,12 +550,16 @@ indx_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(
     case 6:
         // Dummy read from effective address
         cpu.instruction_temp_value = cpu_bus_read(bus, cpu.instruction_operands.whole)
+
+        cpu.will_write = true
     case 7:
         // Write the value back to effective address, perform action
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 8:
         // Write the new value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
@@ -560,12 +591,16 @@ indy_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(
     case 6:
         // Dummy read from effective address
         cpu.instruction_temp_value = cpu_bus_read(bus, cpu.instruction_operands.whole)
+
+        cpu.will_write = true
     case 7:
         // Write the value back to effective address, perform action
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
         action(cpu, bus, &cpu.instruction_temp_value)
 
         cpu_poll_interrupts(cpu, bus)
+
+        cpu.will_write = true
     case 8:
         // Write the new value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, cpu.instruction_temp_value)
