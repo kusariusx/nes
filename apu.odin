@@ -29,6 +29,7 @@ APU :: struct {
     dmc_dma_halt_on_read: bool, // false means halt on write
     dmc_dma_active: bool,
     dmc_dma_cycle: u8,
+    dmc_dma_aborted: bool,
 
     dmc_toggle_delay: u8,
     dmc_toggle_pending_value: u8,
@@ -120,8 +121,17 @@ apu_tick :: proc(a: ^APU) {
     if a.status.dmc == 1 {
         // Request DMC DMA when buffer is empty
         // Reload DMA - halt CPU on write cycle
-        if a.dmc_sample_buffer_is_empty && a.dmc_bytes_remaining > 0 && a.dmc_dma_cycle == 0 {
+        // 
+        // Note: !dmc_dma_aborted condition is needed to prevent DMA re-trigger loop - when DMA is aborted, dmc_dma_cycle
+        // is set to 0, leading to APU trying to start another DMA because the buffer is still empty.
+        if a.dmc_sample_buffer_is_empty && a.dmc_bytes_remaining > 0 && a.dmc_dma_cycle == 0 && !a.dmc_dma_aborted {
             trace_apu("requesting reload DMA")
+
+            // If DMC was disabled on a cycle preceding DMA schedule (dmc_toggle_delay == 1), DMA must be aborted.
+            // Aborted DMA will still halt the CPU for 1 cycle in case it is not postponed due to landing on a write cycle.
+            if a.dmc_toggle_delay == 1 && a.dmc_toggle_pending_value == 0 {
+                a.dmc_dma_aborted = true
+            }
 
             a.dmc_dma_pending = true
             a.dmc_dma_halt_on_read = false
@@ -194,6 +204,9 @@ apu_tick :: proc(a: ^APU) {
                         a.dmc_dma_halt_on_read = true
                     }
                 }
+
+                // Reset once we toggled the DMC
+                a.dmc_dma_aborted = false
             }
         }
 

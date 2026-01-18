@@ -87,12 +87,17 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 
 	// Handle DMC DMA
 	if bus.apu.dmc_dma_cycle > 0 && !bus.apu.dmc_dma_halt_pending {
-		bus.apu.dmc_dma_cycle -= 1
-
-		if bus.apu.dmc_dma_cycle == 0 {
-			dmc_dma_action = true
+		if bus.apu.status.dmc == 0 { // DMC was disabled during ongoing DMA - abort the DMA
+			bus.apu.dmc_dma_cycle = 0
+			dmc_dma_dummy_read = true // Still do this cycle's read
 		} else {
-			dmc_dma_dummy_read = true
+			bus.apu.dmc_dma_cycle -= 1
+
+			if bus.apu.dmc_dma_cycle == 0 {
+				dmc_dma_action = true
+			} else {
+				dmc_dma_dummy_read = true
+			}
 		}
 	}
 
@@ -107,17 +112,30 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		}
 	}
 
-	if bus.apu.dmc_dma_halt_pending && !cpu.will_write {
-		bus.apu.dmc_dma_halt_pending = false
+	if bus.apu.dmc_dma_halt_pending {
+		if !cpu.will_write {
+			bus.apu.dmc_dma_halt_pending = false
 
-		// TODO: again, this is a hack because I don't properly emulate the address bus
-		if cpu.instruction == nil { // If we're at instruction start, the CPU was about to fetch opcode from PC
-			bus.apu.dmc_dma_dummy_read_address = cpu.PC
-		} else { // Mid-instruction, use the last known operand address
-			bus.apu.dmc_dma_dummy_read_address = cpu.instruction_operands.whole
+			// TODO: again, this is a hack because I don't properly emulate the address bus
+			if cpu.instruction == nil { // If we're at instruction start, the CPU was about to fetch opcode from PC
+				bus.apu.dmc_dma_dummy_read_address = cpu.PC
+			} else { // Mid-instruction, use the last known operand address
+				bus.apu.dmc_dma_dummy_read_address = cpu.instruction_operands.whole
+			}
+
+			dmc_dma_dummy_read = true
 		}
 
-		dmc_dma_dummy_read = true
+		if bus.apu.dmc_dma_aborted {
+			// Abort DMA
+			bus.apu.dmc_dma_cycle = 0
+			bus.apu.dmc_dma_halt_pending = false
+
+			// If aborted DMA was postponed due to landing on write cycle, DMA should not halt at all
+			if cpu.will_write {
+				dmc_dma_dummy_read = false
+			}
+		}
 	}
 
 	// Handle OAM DMA
