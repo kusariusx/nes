@@ -1,5 +1,6 @@
 package main
 
+import "core:log"
 import sdl "vendor:sdl2"
 
 WINDOW_SCALE :: 3
@@ -157,6 +158,13 @@ ui_poll_event :: proc(ui: ^UI) -> bool {
 		case sdl.EventType.KEYDOWN, sdl.EventType.KEYUP:
             if event.key.keysym.sym == sdl.Keycode.Q {
                 return false // Quit the app
+            }
+
+            when ODIN_DEBUG {
+                if event.type == sdl.EventType.KEYDOWN && event.key.keysym.sym == sdl.Keycode.T {
+                    TRACING_ENABLED = !TRACING_ENABLED
+                    log.infof("tracing %s", TRACING_ENABLED ? "enabled" : "disabled")
+                }
             }
 
             key_state := event.type == sdl.EventType.KEYDOWN ? UI_Key_State.Down : UI_Key_State.Up

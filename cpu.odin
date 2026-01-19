@@ -101,20 +101,18 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		}
 	}
 
-	if bus.apu.dmc_dma_pending && cpu.is_read_cycle == bus.apu.dmc_dma_halt_on_read {
+	if bus.apu.dmc_dma_pending {
 		bus.apu.dmc_dma_pending = false
 		bus.apu.dmc_dma_halt_pending = true
-		
-		if bus.apu.dmc_dma_halt_on_read { // Load DMA
-			bus.apu.dmc_dma_cycle = 2
-		} else { // Reload DMA
-			bus.apu.dmc_dma_cycle = 3
-		}
 	}
 
 	if bus.apu.dmc_dma_halt_pending {
 		if !cpu.will_write {
+			// DMA will halt the CPU for 3 or 4 cycles, depending on whether the start of the DMA lands on read or write cycle.
+			bus.apu.dmc_dma_cycle = cpu.is_read_cycle ? 2 : 3
+
 			bus.apu.dmc_dma_halt_pending = false
+			dmc_dma_dummy_read = true
 
 			// TODO: again, this is a hack because I don't properly emulate the address bus
 			if cpu.instruction == nil { // If we're at instruction start, the CPU was about to fetch opcode from PC
@@ -122,8 +120,10 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 			} else { // Mid-instruction, use the last known operand address
 				bus.apu.dmc_dma_dummy_read_address = cpu.instruction_operands.whole
 			}
-
-			dmc_dma_dummy_read = true
+		} else {
+			// When DMA lands on a cycle when CPU writes to bus, DMA is postponed and CPU is not halted. DMA will attempt
+			// to halt the CPU on the next cycle, regardless of whether it is read or write cycle (however, the halt duration
+			// will change depending on what type of cycle the start of the DMA lands on).
 		}
 
 		if bus.apu.dmc_dma_aborted {
@@ -162,6 +162,12 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	}
 
 	if dmc_dma_dummy_read || dmc_dma_action || oam_dma_dummy_read || oam_dma_action { // We have some pending DMA work
+		trace(
+			.CPU, 
+			"DMA work pending: dmc_dma_dummy_read = %t, dmc_dma_action = %t, oam_dma_dummy_read = %t, oam_dma_action = %t",
+			dmc_dma_dummy_read, dmc_dma_action, oam_dma_dummy_read, oam_dma_action,
+		)
+
 		/* 
 		Since there are 4 flags, there are 16 possible states, but some of them as impossible by design. For example,
 		it is not possible for both OAM DMA action and OAM DMA dummy read to be pending at the same time. After excluding 
@@ -183,6 +189,8 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 			bus.apu.dmc_sample_buffer = cpu_bus_read(bus, bus.apu.dmc_current_address)
 			bus.apu.dmc_sample_buffer_is_empty = false
 
+			trace(.CPU, "DMA'd $%02X into DMC sample buffer", bus.apu.dmc_sample_buffer)
+
 			if bus.apu.dmc_current_address == 0xFFFF {
 				bus.apu.dmc_current_address = 0x8000
 			} else {
@@ -193,6 +201,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 			if bus.apu.dmc_bytes_remaining == 0  {
 				if bus.apu.dmc_flags & 0b01000000 == 0 { // No loop, assert IRQ if enabled
 					if bus.apu.dmc_flags & 0b10000000 != 0 {
+						trace(.CPU, "requesting DMC IRQ")
 						bus.apu.status.dmc_interrupt = 1
 					}
 
@@ -254,7 +263,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		// Check for interrupts
 		// Note: when handling interrupts, writes to PC are suppressed, hence not incrementing it
 		if cpu.nmi_pending {
-			trace("acknowledging NMI")
+			trace(.CPU, "acknowledging NMI")
 
 			// Acknowledge NMI
 			cpu.nmi_latch = false
@@ -265,8 +274,8 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 
 			cpu.interrupt_vector = NMI_Vector
 			cpu.instruction = &Interrupt_Handler
-		} else if cpu.irq_latch && cpu.P.I == 0 {
-			trace("acknowledging IRQ")
+		} else if cpu.irq_latch {
+			trace(.CPU, "acknowledging IRQ")
 
 			cpu.irq_latch = false
 			
@@ -282,6 +291,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	}
 
 	trace(
+		.CPU,
 		"(%d, %d) [PC:%04X P:%02X S:%02X A:%02X X:%02X Y:%02X] %d - %s", 
 		bus.ppu.scanline, bus.ppu.scanline_cycle, 
 		cpu.PC, u8(cpu.P), cpu.S, cpu.A, cpu.X, cpu.Y,
@@ -307,7 +317,7 @@ cpu_detect_nmi :: proc(c: ^CPU, b: ^NES_CPU_Bus) {
 	// be set or cleared *simultaneously* with currently running CPU cycle.
 	nmi_line := (b.ppu.PPUSTATUS.V == 1 || b.ppu.will_set_vbl) && !b.ppu.will_clear_ppustatus && b.ppu.PPUCTRL.V == 1
 	if !c.nmi_line_prev && nmi_line {
-		trace("NMI edge detected")
+		trace(.CPU, "NMI edge detected")
 		c.nmi_latch = true
 	}
 
@@ -344,7 +354,9 @@ cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
 		b.apu.status.frame_interrupt == 1 || // APU Frame Counter
 		b.apu.status.dmc_interrupt == 1 // APU DMC
 
-	trace("interrupt polling: NMI %t, IRQ %t", c.nmi_latch, c.irq_latch)
+	c.irq_latch &&= c.P.I == 0
+
+	trace(.CPU, "interrupt polling: NMI %t, IRQ %t", c.nmi_latch, c.irq_latch)
 }
 
 cpu_tick_test_bus :: proc(cpu: ^CPU, bus: ^Test_CPU_Bus) {
@@ -432,7 +444,7 @@ interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, is_brk: b
 
 		// Detect interrupt hijacking
 		if cpu.nmi_latch {
-			trace("interrupt hijacked by the NMI")
+			trace(.CPU, "interrupt hijacked by the NMI")
 
 			cpu.nmi_latch = false // Acknowledge the hijacking NMI
 			cpu.irq_latch = false // IRQ forgotten when NMI wins

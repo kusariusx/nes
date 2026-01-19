@@ -42,6 +42,8 @@ nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16) -> u8 {
         b.data_bus_value = res
     }
 
+    trace(.CPU_BUS, "read $%02X from $%04X, data bus now holds $%02X", res, address, b.data_bus_value)
+
     return res
 }
 
@@ -54,6 +56,8 @@ nes_cpu_bus_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
     }
 
     nes_cpu_bus_resolve_write(b, address, value)
+
+    trace(.CPU_BUS, "wrote $%02X to $%04X, data bus now holds $%02X", value, address, b.data_bus_value)
 }
 
 // Handles read-write and read-only addresses.

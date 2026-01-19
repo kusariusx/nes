@@ -65,7 +65,7 @@ apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
             dmc_interrupt = a.status.dmc_interrupt,
         }
 
-        trace_apu("4015 read, returning %v", u8(status))
+        trace(.APU, "4015 read, returning %v", u8(status))
 
         return u8(status), 0b11011111 // Bit 5 is open bus
     case 0x4017: // Frame counter
@@ -86,17 +86,17 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
             a.status.dmc_interrupt = 0
         }
 
-        trace_apu("set DMC flags to %02X and rate to %v", value, a.dmc_rate)
+        trace(.APU, "set DMC flags to %02X and rate to %v", value, a.dmc_rate)
     case 0x4011:
         a.dmc_output = value & 0x7F
     case 0x4012:
         a.dmc_sample_address = 0xC000 + u16(value) * 64
-        trace_apu("set sample address to %04X", a.dmc_sample_address)
+        trace(.APU, "set sample address to %04X", a.dmc_sample_address)
     case 0x4013:
         a.dmc_sample_length = u16(value) * 16 + 1
-        trace_apu("set sample length to %v", a.dmc_sample_length)
+        trace(.APU, "set sample length to %v", a.dmc_sample_length)
     case 0x4015: // Status
-        trace_apu("4015 write, writing %v", value)
+        trace(.APU, "4015 write, writing %v", value)
 
         status := APU_Status_Bits(value)
 
@@ -135,6 +135,8 @@ apu_tick :: proc(a: ^APU) {
             aborted_reload_dma := (regular_reload_dma && a.dmc_toggle_delay == 1 && a.dmc_toggle_pending_value == 0) || a.dmc_dma_sample_just_finished_prev
 
             if regular_reload_dma || aborted_reload_dma {
+                trace(.APU, "requesting reload DMA")
+
                 a.dmc_dma_pending = true
                 a.dmc_dma_halt_on_read = false
             }
@@ -145,12 +147,12 @@ apu_tick :: proc(a: ^APU) {
 
     // Tick DMC timer according to rate
     if a.dmc_rate_counter == 0 {
-        trace_apu("DMC rate tick, rate = %v", a.dmc_rate)
+        trace(.APU, "DMC rate tick, rate = %v", a.dmc_rate)
 
         a.dmc_rate_counter = a.dmc_rate
 
         if !a.dmc_is_silence {
-            trace_apu("DMC is not silenced, changing output according to delta")
+            trace(.APU, "DMC is not silenced, changing output according to delta")
 
             direction := a.dmc_shifter & 1
             if direction == 1 && a.dmc_output <= 125 { // Output is capped to 0-127
@@ -164,16 +166,16 @@ apu_tick :: proc(a: ^APU) {
 
         a.dmc_bits_remaining -= 1
         if a.dmc_bits_remaining == 0 { // New output cycle
-            trace_apu("DMC sample completed")
+            trace(.APU, "DMC sample completed")
 
             a.dmc_bits_remaining = 8
 
             if a.dmc_sample_buffer_is_empty {
-                trace_apu("sample buffer is empty, silencing DMC")
+                trace(.APU, "sample buffer is empty, silencing DMC")
 
                 a.dmc_is_silence = true
             } else {
-                trace_apu("buffer is not empty, emptying sample buffer into shifter")
+                trace(.APU, "buffer is not empty, emptying sample buffer into shifter")
 
                 a.dmc_is_silence = false
                 a.dmc_shifter = a.dmc_sample_buffer
@@ -198,7 +200,7 @@ apu_tick :: proc(a: ^APU) {
                 if a.status.dmc == 0 {
                     a.dmc_bytes_remaining = 0
                 } else if a.dmc_bytes_remaining == 0 {
-                    trace_apu("restarting sample")
+                    trace(.APU, "restarting sample")
         
                     a.dmc_current_address = a.dmc_sample_address
                     a.dmc_bytes_remaining = a.dmc_sample_length
@@ -206,7 +208,7 @@ apu_tick :: proc(a: ^APU) {
                     // Request first sample immediately
                     // Load DMA - halt CPU on read cycle
                     if a.dmc_sample_buffer_is_empty {
-                        trace_apu("requesting load DMA")
+                        trace(.APU, "requesting load DMA")
         
                         a.dmc_dma_pending = true
                         a.dmc_dma_halt_on_read = true
@@ -219,6 +221,8 @@ apu_tick :: proc(a: ^APU) {
         }
 
         if a.will_clear_frame_interrupt || frame_counter_interrupt_inhibit == 1 {
+            trace(.APU, "clearing frame interrupt flag")
+
             a.status.frame_interrupt = 0
             a.will_clear_frame_interrupt = false
         }
@@ -240,6 +244,8 @@ apu_tick :: proc(a: ^APU) {
     case 11185:
     case 14914:
         if frame_counter_mode == 0 {
+            trace(.APU, "setting frame interrupt flag")
+            
             a.frame_counter = 0xFFFF // Set to 0xFFFF so it wraps around to 0 on next tick
             a.status.frame_interrupt = 1
         }
@@ -249,6 +255,8 @@ apu_tick :: proc(a: ^APU) {
         }
     case 0:
         if a.is_read_cycle && frame_counter_mode == 0 && frame_counter_interrupt_inhibit == 0 {
+            trace(.APU, "setting frame interrupt flag")
+            
             a.status.frame_interrupt = 1
         }
     }
