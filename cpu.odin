@@ -195,6 +195,8 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 					if bus.apu.dmc_flags & 0b10000000 != 0 {
 						bus.apu.status.dmc_interrupt = 1
 					}
+
+					bus.apu.dmc_dma_sample_just_finished = true
 				} else { // Loop
 					bus.apu.dmc_current_address = bus.apu.dmc_sample_address
 					bus.apu.dmc_bytes_remaining = bus.apu.dmc_sample_length

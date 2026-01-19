@@ -30,6 +30,8 @@ APU :: struct {
     dmc_dma_active: bool,
     dmc_dma_cycle: u8,
     dmc_dma_aborted: bool,
+    dmc_dma_sample_just_finished: bool,
+    dmc_dma_sample_just_finished_prev: bool,
 
     dmc_toggle_delay: u8,
     dmc_toggle_pending_value: u8,
@@ -124,17 +126,20 @@ apu_tick :: proc(a: ^APU) {
         // 
         // Note: !dmc_dma_aborted condition is needed to prevent DMA re-trigger loop - when DMA is aborted, dmc_dma_cycle
         // is set to 0, leading to APU trying to start another DMA because the buffer is still empty.
-        if a.dmc_sample_buffer_is_empty && a.dmc_bytes_remaining > 0 && a.dmc_dma_cycle == 0 && !a.dmc_dma_aborted {
-            trace_apu("requesting reload DMA")
-
-            // If DMC was disabled on a cycle preceding DMA schedule (dmc_toggle_delay == 1), DMA must be aborted.
+        if a.dmc_sample_buffer_is_empty && !a.dmc_dma_aborted {
+            regular_reload_dma := a.dmc_bytes_remaining > 0 && a.dmc_dma_cycle == 0
+            
+            // If DMC was disabled on a cycle preceding regular DMA schedule (dmc_toggle_delay == 1), DMA must be aborted.
             // Aborted DMA will still halt the CPU for 1 cycle in case it is not postponed due to landing on a write cycle.
-            if a.dmc_toggle_delay == 1 && a.dmc_toggle_pending_value == 0 {
-                a.dmc_dma_aborted = true
+            // Additionally, if the last bit of the DMC sample was processed on a preceding cycle, DMA must also be in aborted state.
+            aborted_reload_dma := (regular_reload_dma && a.dmc_toggle_delay == 1 && a.dmc_toggle_pending_value == 0) || a.dmc_dma_sample_just_finished_prev
+
+            if regular_reload_dma || aborted_reload_dma {
+                a.dmc_dma_pending = true
+                a.dmc_dma_halt_on_read = false
             }
 
-            a.dmc_dma_pending = true
-            a.dmc_dma_halt_on_read = false
+            a.dmc_dma_aborted = aborted_reload_dma
         }
     }
 
@@ -181,6 +186,9 @@ apu_tick :: proc(a: ^APU) {
 
     // Things that need to happen "every APU cycle" (every other cycle)
     if a.is_read_cycle {
+        a.dmc_dma_sample_just_finished_prev = a.dmc_dma_sample_just_finished
+        a.dmc_dma_sample_just_finished = false
+
         // Delayed DMC toggle
         if a.dmc_toggle_delay > 0 {
             a.dmc_toggle_delay -= 1
