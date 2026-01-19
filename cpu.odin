@@ -148,7 +148,8 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		}
 	}
 
-	if bus.oam_dma_pending {
+	// OAM DMA cannot land on a write cycle as well
+	if bus.oam_dma_pending && !cpu.will_write {
 		oam_dma_dummy_read = true
 
 		// We should wait for either 2 or 1 cycles depending on whether this is a read or a write cycle
