@@ -187,7 +187,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 
 		if dmc_dma_action {
 			// Perform DMC DMA action
-			bus.apu.dmc_sample_buffer = cpu_bus_read(bus, bus.apu.dmc_current_address)
+			bus.apu.dmc_sample_buffer = cpu_bus_read(bus, bus.apu.dmc_current_address, is_dma = true)
 			bus.apu.dmc_sample_buffer_is_empty = false
 
 			trace(.CPU, "DMA'd $%02X into DMC sample buffer", bus.apu.dmc_sample_buffer)
@@ -220,7 +220,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		} else if oam_dma_action {
 			// Perform OAM DMA action
 			if cpu.is_read_cycle { // Read from page
-				bus.oam_dma_data = cpu_bus_read(bus, bus.oam_dma_address)
+				bus.oam_dma_data = cpu_bus_read(bus, bus.oam_dma_address, is_dma = true)
 			} else { // Write to OAMDATA
 				cpu_bus_write(bus, OAMDATA_ADDRESS, bus.oam_dma_data)
 	
@@ -253,6 +253,8 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	}
 
 	if cpu.instruction == nil { // We start executing a new instruction
+		cpu.instruction_operands.whole = 0
+		
 		// This is the first cycle of any instruction
 		// Start with 1 for better alignment with the documentation
 		cpu.instruction_cycle = 1

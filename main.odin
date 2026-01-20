@@ -139,10 +139,10 @@ tracking_allocator_report :: proc(track: mem.Tracking_Allocator) {
 	}
 }
 
-NES_Component :: enum { CPU, APU, PPU, CPU_BUS }
+NES_Component :: enum { CPU, APU, PPU, CPU_BUS, IO }
 
 // TODO: configure this using compile-time flags? Or maybe simply at runtime?
-TRACE_COMPONENT :: bit_set[NES_Component]{ .CPU, .APU, .PPU, .CPU_BUS }
+TRACE_COMPONENT :: bit_set[NES_Component]{ .CPU, .APU, .PPU, .CPU_BUS, .IO }
 
 @(disabled=!ODIN_DEBUG) // Disabled when not in debug
 trace :: proc(component: NES_Component, $format: string, args: ..any, loc := #caller_location) {
@@ -169,6 +169,11 @@ trace :: proc(component: NES_Component, $format: string, args: ..any, loc := #ca
 	trace_cpu_bus :: proc($format: string, args: ..any, loc := #caller_location) {
 		log.debugf("CPU BUS: " + format, ..args, location = loc)
 	}
+
+	@(disabled=.IO not_in TRACE_COMPONENT)
+	trace_io :: proc($format: string, args: ..any, loc := #caller_location) {
+		log.debugf("IO: " + format, ..args, location = loc)
+	}
 	
 	switch component {
 	case .CPU:
@@ -179,5 +184,7 @@ trace :: proc(component: NES_Component, $format: string, args: ..any, loc := #ca
 		trace_apu(format, ..args, loc = loc)
 	case .CPU_BUS:
 		trace_cpu_bus(format, ..args, loc = loc)
+	case .IO:
+		trace_io(format, ..args, loc = loc)
 	}
 }

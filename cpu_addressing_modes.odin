@@ -433,7 +433,7 @@ abs_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
         cpu_poll_interrupts(cpu, bus)
 
         cpu.will_write = true
-    case 4:    
+    case 4:
         // Write value to effective address, done
         cpu_bus_write(bus, cpu.instruction_operands.whole, value)
         cpu_instruction_done(cpu)

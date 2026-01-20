@@ -19,17 +19,69 @@ NES_CPU_Bus :: struct {
     oam_dma_address: u16,
     oam_dma_data: u8,
 
-    // Reading open bus returns the last value read from valid address, or written to any address
+    // Reading open bus returns the last value read from valid address, or written to any address.
     data_bus_value: u8,
+
+    // Actually there are 3 "internal" address buses: CPU, DMC DMA and OAM DMA. They are multiplexed onto
+    // a single "external" address bus which actually decides what data to load. This variable tracks CPU internal
+    // address bus for the purpose of gating access to APU registers - they are active and readable only when
+    // CPU address bus points to the range $4000-$401F.
+    address_bus_value: u16,
 }
 
-nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16) -> u8 {
-    value, mask: u8
+nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16, is_dma := false) -> u8 {
+    // DMA reads do not update CPU address bus, because DMAs have their own buses
+    if !is_dma {
+        b.address_bus_value = address
+    }
     
-    if address >= 0x4020 && address <= 0xFFFF { // Unmapped space, let mapper handle
-        value, mask = mapper_cpu_read(b.mapper, b.rom, address)
+    value, mask: u8
+
+    apu_registers_active := b.address_bus_value >= 0x4000 && b.address_bus_value <= 0x401F
+    apu_address_space := address >= 0x4000 && address <= 0x40FF
+    mapper_region := address >= 0x4020 && address <= 0xFFFF
+
+    if apu_registers_active {
+        // APU address space is mirrored
+        apu_address := 0x4000 | (address & 0x1F)
+        apu_value, apu_mask := nes_cpu_bus_resolve_read(b, apu_address)
+
+        if apu_address_space { // Reading APU address space when it's active - all good
+            value, mask = apu_value, apu_mask
+        } else { // Trying to read outside of APU address space when it's active - bus conflict
+            conflicting_value, conflicting_mask: u8
+
+            if mapper_region {
+                conflicting_value, conflicting_mask = mapper_cpu_read(b.mapper, b.rom, address)
+            } else {
+                conflicting_value, conflicting_mask = nes_cpu_bus_resolve_read(b, address)
+            }
+
+            if mapper_region && apu_address == 0x4015 {
+                // Special handling for address $4015 when conflicting with mapper - mapper completely overwrites the bus
+                apu_mask = 0
+            } else {
+                // Conflicting value will occupy open bus bits of the APU value
+                conflicting_mask = ~apu_mask
+            }
+            
+            value = (apu_value & apu_mask) | (conflicting_value & conflicting_mask)
+            mask = apu_mask | conflicting_mask
+
+            trace(
+                .CPU_BUS, 
+                "bus conflict: apu_address = $%04X, apu_value = $%02X, apu_mask = $%02X, conflicting_value = $%02X, conflicting_mask = $%02X",
+                apu_address, apu_value, apu_mask, conflicting_value, conflicting_mask,
+            )
+        }
     } else {
-        value, mask = nes_cpu_bus_resolve_read(b, address)
+        if apu_address_space { // Trying to read APU address space when it's not active - open bus
+            value, mask = 0, 0
+        } else if mapper_region { // Unmapped space, let mapper handle
+            value, mask = mapper_cpu_read(b.mapper, b.rom, address)
+        } else {
+            value, mask = nes_cpu_bus_resolve_read(b, address)
+        }
     }
 
     // Apply active value bits and retain inactive bits
@@ -42,7 +94,7 @@ nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16) -> u8 {
         b.data_bus_value = res
     }
 
-    trace(.CPU_BUS, "read $%02X from $%04X, data bus now holds $%02X", res, address, b.data_bus_value)
+    trace(.CPU_BUS, "read $%02X from $%04X, address bus - $%04X, data bus - $%02X", res, address, b.address_bus_value, b.data_bus_value)
 
     return res
 }
@@ -57,7 +109,7 @@ nes_cpu_bus_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
 
     nes_cpu_bus_resolve_write(b, address, value)
 
-    trace(.CPU_BUS, "wrote $%02X to $%04X, data bus now holds $%02X", value, address, b.data_bus_value)
+    trace(.CPU_BUS, "wrote $%02X to $%04X, address bus - $%04X, data bus - $%02X", value, address, b.address_bus_value, b.data_bus_value)
 }
 
 // Handles read-write and read-only addresses.
@@ -153,10 +205,10 @@ CPU_Bus :: union {
     ^Test_CPU_Bus,
 }
 
-cpu_bus_read :: proc(b: CPU_Bus, address: u16) -> u8 {
+cpu_bus_read :: proc(b: CPU_Bus, address: u16, is_dma := false) -> u8 {
     switch bus in b {
     case ^NES_CPU_Bus:
-        return nes_cpu_bus_read(bus, address)
+        return nes_cpu_bus_read(bus, address, is_dma)
     case ^Test_CPU_Bus:
         return test_cpu_bus_read(bus, address)
     }
