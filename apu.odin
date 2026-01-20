@@ -2,6 +2,11 @@ package main
 
 APU_DMC_Rate_Lookup := []u16{428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54}
 
+APU_Length_Counter_Lookup := []u8 { 
+    10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14,
+    12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
+}
+
 APU_Status_Bits :: bit_field u8 {
     pulse1:          u8 | 1,
     pulse2:          u8 | 1,
@@ -48,6 +53,9 @@ APU :: struct {
     dmc_sample_buffer_is_empty: bool,
     dmc_shifter: u8,
     dmc_bits_remaining: u8,
+
+    triangle_length_counter: u8,
+    triangle_length_counter_halt: bool,
 }
 
 apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
@@ -58,14 +66,12 @@ apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
         status := APU_Status_Bits{
             pulse1 = 0,
             pulse2 = 0,
-            triangle = 0,
+            triangle = a.triangle_length_counter > 0 ? 1 : 0,
             noise = 0,
             dmc = a.dmc_bytes_remaining > 0 ? 1 : 0,
             frame_interrupt = a.status.frame_interrupt,
             dmc_interrupt = a.status.dmc_interrupt,
         }
-
-        trace(.APU, "4015 read, returning %v", u8(status))
 
         return u8(status), 0b11011111 // Bit 5 is open bus
     case 0x4017: // Frame counter
@@ -76,6 +82,12 @@ apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
 
 apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
     switch address {
+    case 0x4008: // Triangle channel length counter
+        a.triangle_length_counter_halt = value >> 7 == 1
+    case 0x400B:
+        if a.status.triangle == 1 {
+            a.triangle_length_counter = APU_Length_Counter_Lookup[value >> 3]
+        }
     case 0x4010: 
         a.dmc_flags = value
 
@@ -96,14 +108,17 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
         a.dmc_sample_length = u16(value) * 16 + 1
         trace(.APU, "set sample length to %v", a.dmc_sample_length)
     case 0x4015: // Status
-        trace(.APU, "4015 write, writing %v", value)
-
         status := APU_Status_Bits(value)
+
+        if status.triangle == 0 {
+            a.triangle_length_counter = 0
+        }
 
         a.dmc_toggle_pending_value = status.dmc
         a.dmc_toggle_delay = 2
         status.dmc = a.status.dmc // Preserve original bit
 
+        status.frame_interrupt = a.status.frame_interrupt
         status.dmc_interrupt = 0
 
         a.status = status
@@ -186,7 +201,7 @@ apu_tick :: proc(a: ^APU) {
 
     a.dmc_rate_counter -= 1
 
-    // Things that need to happen "every APU cycle" (every other cycle)
+    // Things that need to happen "every APU cycle" (every other CPU cycle)
     if a.is_read_cycle {
         a.dmc_dma_sample_just_finished_prev = a.dmc_dma_sample_just_finished
         a.dmc_dma_sample_just_finished = false
@@ -241,6 +256,11 @@ apu_tick :: proc(a: ^APU) {
     switch a.frame_counter {
     case 3728:
     case 7456:
+        if !a.is_read_cycle {
+            if !a.triangle_length_counter_halt && a.triangle_length_counter > 0 {
+                a.triangle_length_counter -= 1
+            }
+        }
     case 11185:
     case 14914:
         if frame_counter_mode == 0 {
@@ -248,10 +268,22 @@ apu_tick :: proc(a: ^APU) {
             
             a.frame_counter = 0xFFFF // Set to 0xFFFF so it wraps around to 0 on next tick
             a.status.frame_interrupt = 1
+
+            if !a.is_read_cycle {
+                if !a.triangle_length_counter_halt && a.triangle_length_counter > 0 {
+                    a.triangle_length_counter -= 1
+                }
+            }
         }
     case 18640:
         if frame_counter_mode == 1 {
             a.frame_counter = 0xFFFF
+
+            if !a.is_read_cycle {
+                if !a.triangle_length_counter_halt && a.triangle_length_counter > 0 {
+                    a.triangle_length_counter -= 1
+                }
+            }
         }
     case 0:
         if a.is_read_cycle && frame_counter_mode == 0 && frame_counter_interrupt_inhibit == 0 {
