@@ -39,6 +39,7 @@ CPU :: struct {
     },
 
 	halt: bool,
+	was_halted: bool,
 
 	nmi_line_prev: bool, // For NMI edge detection
 
@@ -244,6 +245,8 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 			}
 		}
 
+		cpu.was_halted = true
+
 		return
 	}
 
@@ -309,6 +312,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
 
 	cpu.instruction_cycle += 1
+	cpu.was_halted = false
 
 	cpu_detect_nmi(cpu, bus)
 }

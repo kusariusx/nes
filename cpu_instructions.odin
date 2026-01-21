@@ -1224,12 +1224,14 @@ sbx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // CMP and DEX at once, sets f
 
 sha_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
-    case 2 ..= 4:
+    case 2 ..= 3:
+        absi_write(cpu, bus, cycle, cpu.Y, 0)
+    case 4:
         absi_write(cpu, bus, cycle, cpu.Y, 0)
 
-        if cycle == 4 { // Second-to-last cycle
-            cpu_poll_interrupts(cpu, bus)
-        }
+        // If this cycle is executing immediately after the halt/interrupt (when RDY line transitions from low to high),
+        // this instruction skips AND'ing value with (H + 1) - this has something to do with how RDY signal interacts with the bus.
+        cpu.instruction_temp_value = cpu.was_halted ? 1 : 0
     case 5:
         // We need to intercept the 5th cycle of the instruction to get access to effective address (calculated on previous cycles).
         // This instruction is weird and very unstable. General description/observations from my own research:
@@ -1241,15 +1243,21 @@ sha_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
         // 4. When the page boundary is crossed, the high byte of the effetive address itself is corrupted and
         //    gets AND'ed with A & X.
 
-        value := cpu.A & cpu.X
+        // The value will be AND'ed with (H + 1) unless previous cycle was interrupted
+        high_byte := cpu.instruction_operands.bytes[HIGH]
+
         if cpu.instruction_operands.bytes[LOW] < cpu.Y { // Page crossed
-            // Not adding 1 because the high byte was already incremented on 4th cycle
-            value &= cpu.instruction_operands.bytes[HIGH] 
+            // (not adding 1 because the high byte was already incremented on 4th cycle)
             
             // Corruption of high byte of the effective address
             cpu.instruction_operands.bytes[HIGH] &= cpu.A & cpu.X
         } else {
-            value &= cpu.instruction_operands.bytes[HIGH] + 1
+            high_byte += 1
+        }
+
+        value := cpu.A & cpu.X
+        if cpu.instruction_temp_value == 0 { // Previous cycle was not interrupted, AND the value with (H + 1)
+            value &= high_byte
         }
 
         absi_write(cpu, bus, cycle, cpu.Y, value)
@@ -1258,21 +1266,26 @@ sha_absy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 
 sha_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
-    case 2 ..= 5:
+    case 2 ..= 4:
+        indy_write(cpu, bus, cycle, 0)
+    case 5:
         indy_write(cpu, bus, cycle, 0)
 
-        if cycle == 5 {
-            cpu_poll_interrupts(cpu, bus)
-        }
+        cpu.instruction_temp_value = cpu.was_halted ? 1 : 0
     case 6:
         // Same logic as in sha_absy, but we intercept the 6th cycle.
 
-        value := cpu.A & cpu.X
+        high_byte := cpu.instruction_operands.bytes[HIGH]
+
         if cpu.instruction_operands.bytes[LOW] < cpu.Y {
-            value &= cpu.instruction_operands.bytes[HIGH] 
             cpu.instruction_operands.bytes[HIGH] &= cpu.A & cpu.X
         } else {
-            value &= cpu.instruction_operands.bytes[HIGH] + 1
+            high_byte += 1
+        }
+
+        value := cpu.A & cpu.X
+        if cpu.instruction_temp_value == 0 {
+            value &= high_byte
         }
 
         indy_write(cpu, bus, cycle, value)
@@ -1281,21 +1294,26 @@ sha_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 
 shx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
-    case 2 ..= 4:
+    case 2 ..= 3:
+        absi_write(cpu, bus, cycle, cpu.Y, 0)
+    case 4:
         absi_write(cpu, bus, cycle, cpu.Y, 0)
 
-        if cycle == 4 {
-            cpu_poll_interrupts(cpu, bus)
-        }
+        cpu.instruction_temp_value = cpu.was_halted ? 1 : 0
     case 5:
         // Same logic as in sha_absy, but the corruption takes the form of X and not A & X.
 
-        value := cpu.X
-        if cpu.instruction_operands.bytes[LOW] < cpu.Y { 
-            value &= cpu.instruction_operands.bytes[HIGH] 
+        high_byte := cpu.instruction_operands.bytes[HIGH]
+
+        if cpu.instruction_operands.bytes[LOW] < cpu.Y {
             cpu.instruction_operands.bytes[HIGH] &= cpu.X
         } else {
-            value &= cpu.instruction_operands.bytes[HIGH] + 1
+            high_byte += 1
+        }
+
+        value := cpu.X
+        if cpu.instruction_temp_value == 0 {
+            value &= high_byte
         }
 
         absi_write(cpu, bus, cycle, cpu.Y, value)
@@ -1304,21 +1322,26 @@ shx :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 
 shy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
-    case 2 ..= 4:
+    case 2 ..= 3:
+        absi_write(cpu, bus, cycle, cpu.X, 0)
+    case 4:
         absi_write(cpu, bus, cycle, cpu.X, 0)
 
-        if cycle == 4 {
-            cpu_poll_interrupts(cpu, bus)
-        }
+        cpu.instruction_temp_value = cpu.was_halted ? 1 : 0
     case 5:
         // Same logic as in sha_absy, but the corruption takes the form of Y and not A & X.
 
-        value := cpu.Y
-        if cpu.instruction_operands.bytes[LOW] < cpu.X { 
-            value &= cpu.instruction_operands.bytes[HIGH] 
+        high_byte := cpu.instruction_operands.bytes[HIGH]
+
+        if cpu.instruction_operands.bytes[LOW] < cpu.X {
             cpu.instruction_operands.bytes[HIGH] &= cpu.Y
         } else {
-            value &= cpu.instruction_operands.bytes[HIGH] + 1
+            high_byte += 1
+        }
+
+        value := cpu.Y
+        if cpu.instruction_temp_value == 0 {
+            value &= high_byte
         }
 
         absi_write(cpu, bus, cycle, cpu.X, value)
@@ -1393,24 +1416,29 @@ sre_indy :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
 
 tas :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     switch cycle {
-    case 2 ..= 4:
+    case 2 ..= 3:
+        absi_write(cpu, bus, cycle, cpu.Y, 0)
+    case 4:
         absi_write(cpu, bus, cycle, cpu.Y, 0)
 
-        if cycle == 4 {
-            cpu_poll_interrupts(cpu, bus)
-        }
+        cpu.instruction_temp_value = cpu.was_halted ? 1 : 0
     case 5:
         // Puts A AND X in SP and stores A AND X AND (high-byte of addr. + 1) at addr.
         // Same logic as in sha_absy, but with an additional action.
 
         cpu.S = cpu.A & cpu.X
 
-        value := cpu.A & cpu.X
-        if cpu.instruction_operands.bytes[LOW] < cpu.Y { 
-            value &= cpu.instruction_operands.bytes[HIGH] 
+        high_byte := cpu.instruction_operands.bytes[HIGH]
+
+        if cpu.instruction_operands.bytes[LOW] < cpu.Y { // Page crossed
             cpu.instruction_operands.bytes[HIGH] &= cpu.A & cpu.X
         } else {
-            value &= cpu.instruction_operands.bytes[HIGH] + 1
+            high_byte += 1
+        }
+
+        value := cpu.A & cpu.X
+        if cpu.instruction_temp_value == 0 {
+            value &= high_byte
         }
 
         absi_write(cpu, bus, cycle, cpu.Y, value)
