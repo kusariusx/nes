@@ -111,6 +111,12 @@ nes_tick :: proc(nes: ^NES) {
 
     apu_tick(nes.apu)
     cpu_tick(nes.cpu, nes.cpu_bus)
+
+    if nes.cpu.is_read_cycle { // Peripherals cannot be strobed on 2 consecutive cycles
+        peripheral_strobe(nes.io.ports[.Port_1])
+        peripheral_strobe(nes.io.ports[.Port_2])
+        peripheral_strobe(nes.io.ports[.Expansion_Port])
+    }
 }
 
 // Ticks the system enough to run one full CPU instruction

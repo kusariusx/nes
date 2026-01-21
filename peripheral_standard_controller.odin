@@ -1,5 +1,6 @@
 package main
 
+import "core:log"
 Button_State :: enum {
     Released,
     Pressed,
@@ -29,10 +30,6 @@ NES_Standard_Controller_Update :: struct {
 }
 
 nes_standard_controller_read :: proc(c: ^NES_Standard_Controller) -> u8 {
-    if c.strobe { // Reload shift register
-        c.shift_register = c.button_states
-    }
-
     result := c.shift_register & 1
 
     // Shift register right and put 1 into the highest bit because after 8 reads all subsequent reads must return 1 
@@ -43,11 +40,6 @@ nes_standard_controller_read :: proc(c: ^NES_Standard_Controller) -> u8 {
 
 nes_standard_controller_write :: proc(c: ^NES_Standard_Controller, value: u8) {
     c.strobe = value & 1 == 1
-
-    // Start reloading the shift register immediately after write
-    if c.strobe {
-        c.shift_register = c.button_states
-    }
 }
 
 nes_standard_controller_update :: proc(u: NES_Standard_Controller_Update) {
@@ -56,4 +48,10 @@ nes_standard_controller_update :: proc(u: NES_Standard_Controller_Update) {
 
     // Set corresponding bit
     u.controller.button_states = (u.controller.button_states & ~target_bit) | target_state
+}
+
+nes_standard_controller_strobe :: proc(c: ^NES_Standard_Controller) {
+    if c.strobe {
+        c.shift_register = c.button_states
+    }
 }
