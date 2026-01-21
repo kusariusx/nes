@@ -8,10 +8,12 @@ APU_Length_Counter_Lookup := []u8 {
 }
 
 APU_Status_Bits :: bit_field u8 {
+    // Technically these flags control the length counters
     pulse1:          u8 | 1,
     pulse2:          u8 | 1,
     triangle:        u8 | 1,
     noise:           u8 | 1,
+    
     dmc:             u8 | 1,
     _:               u8 | 1, // Open bus on this bit
     frame_interrupt: u8 | 1,
@@ -26,7 +28,7 @@ APU :: struct {
     frame_counter_flags: u8,
     frame_counter: u16, // Counter for APU cycles
     will_clear_frame_interrupt: bool,
-    reset_frame_counter_delay: u8,
+    frame_counter_reset_delay: u8,
 
     dmc_dma_pending: bool,
     dmc_dma_halt_pending: bool,
@@ -54,8 +56,17 @@ APU :: struct {
     dmc_shifter: u8,
     dmc_bits_remaining: u8,
 
+    pulse1_length_counter: u8,
+    pulse1_length_counter_halt: bool,
+
+    pulse2_length_counter: u8,
+    pulse2_length_counter_halt: bool,
+
     triangle_length_counter: u8,
     triangle_length_counter_halt: bool,
+
+    noise_length_counter: u8,
+    noise_length_counter_halt: bool,
 }
 
 apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
@@ -64,10 +75,10 @@ apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
         a.will_clear_frame_interrupt = true
 
         status := APU_Status_Bits{
-            pulse1 = 0,
-            pulse2 = 0,
+            pulse1 = a.pulse1_length_counter > 0 ? 1 : 0,
+            pulse2 = a.pulse2_length_counter > 0 ? 1 : 0,
             triangle = a.triangle_length_counter > 0 ? 1 : 0,
-            noise = 0,
+            noise = a.noise_length_counter > 0 ? 1 : 0,
             dmc = a.dmc_bytes_remaining > 0 ? 1 : 0,
             frame_interrupt = a.status.frame_interrupt,
             dmc_interrupt = a.status.dmc_interrupt,
@@ -82,11 +93,29 @@ apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
 
 apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
     switch address {
-    case 0x4008: // Triangle channel length counter
+    case 0x4000:
+        a.pulse1_length_counter_halt = value & 0b00100000 != 0
+    case 0x4003:
+        if a.status.pulse1 == 1 {
+            a.pulse1_length_counter = APU_Length_Counter_Lookup[value >> 3]
+        }
+    case 0x4004:
+        a.pulse2_length_counter_halt = value & 0b00100000 != 0
+    case 0x4007:
+        if a.status.pulse2 == 1 {
+            a.pulse2_length_counter = APU_Length_Counter_Lookup[value >> 3]
+        }
+    case 0x4008:
         a.triangle_length_counter_halt = value >> 7 == 1
     case 0x400B:
         if a.status.triangle == 1 {
             a.triangle_length_counter = APU_Length_Counter_Lookup[value >> 3]
+        }
+    case 0x400C:
+        a.noise_length_counter_halt = value & 0b00100000 != 0
+    case 0x400F:
+        if a.status.noise == 1 {
+            a.noise_length_counter = APU_Length_Counter_Lookup[value >> 3]
         }
     case 0x4010: 
         a.dmc_flags = value
@@ -110,21 +139,27 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
     case 0x4015: // Status
         status := APU_Status_Bits(value)
 
-        if status.triangle == 0 {
-            a.triangle_length_counter = 0
-        }
+        // Force length counter to 0 when channel is disabled
+        if status.pulse1 == 0 { a.pulse1_length_counter = 0 }
+        if status.pulse2 == 0 { a.pulse2_length_counter = 0 }
+        if status.triangle == 0 { a.triangle_length_counter = 0 }
+        if status.noise == 0 { a.noise_length_counter = 0 }
 
         a.dmc_toggle_pending_value = status.dmc
         a.dmc_toggle_delay = 2
-        status.dmc = a.status.dmc // Preserve original bit
 
-        status.frame_interrupt = a.status.frame_interrupt
-        status.dmc_interrupt = 0
+        status.dmc = a.status.dmc // Preserve original bit because the toggle is delayed
+        status.frame_interrupt = a.status.frame_interrupt // Preserve frame interrupt
+        status.dmc_interrupt = 0 // DMC interrupt is clean on read
 
         a.status = status
     case 0x4017: // Frame counter
         a.frame_counter_flags = value
-        a.reset_frame_counter_delay = 3
+        a.frame_counter_reset_delay = 3
+
+        if a.frame_counter_flags >> 7 == 1 {
+            apu_tick_length_counters(a)
+        }
     }
 }
 
@@ -242,9 +277,9 @@ apu_tick :: proc(a: ^APU) {
             a.will_clear_frame_interrupt = false
         }
 
-        if a.reset_frame_counter_delay > 0 {
-            a.reset_frame_counter_delay -= 1
-            if a.reset_frame_counter_delay == 0 {
+        if a.frame_counter_reset_delay > 0 {
+            a.frame_counter_reset_delay -= 1
+            if a.frame_counter_reset_delay == 0 {
                 a.frame_counter = 0
             }
         }
@@ -256,33 +291,30 @@ apu_tick :: proc(a: ^APU) {
     switch a.frame_counter {
     case 3728:
     case 7456:
-        if !a.is_read_cycle {
-            if !a.triangle_length_counter_halt && a.triangle_length_counter > 0 {
-                a.triangle_length_counter -= 1
-            }
+        if !a.is_read_cycle { 
+            // Length counters are ticked on write/put cycles
+            apu_tick_length_counters(a)
         }
     case 11185:
     case 14914:
-        if frame_counter_mode == 0 {
+        if frame_counter_mode == 0 { // 4-step mode
             trace(.APU, "setting frame interrupt flag")
             
-            a.frame_counter = 0xFFFF // Set to 0xFFFF so it wraps around to 0 on next tick
             a.status.frame_interrupt = 1
 
             if !a.is_read_cycle {
-                if !a.triangle_length_counter_halt && a.triangle_length_counter > 0 {
-                    a.triangle_length_counter -= 1
-                }
+                apu_tick_length_counters(a)
+
+                // Set to 0xFFFF so it wraps around to 0 on next tick
+                a.frame_counter = 0xFFFF
             }
         }
     case 18640:
-        if frame_counter_mode == 1 {
-            a.frame_counter = 0xFFFF
-
+        if frame_counter_mode == 1 { // 5-step mode
             if !a.is_read_cycle {
-                if !a.triangle_length_counter_halt && a.triangle_length_counter > 0 {
-                    a.triangle_length_counter -= 1
-                }
+                apu_tick_length_counters(a)
+
+                a.frame_counter = 0xFFFF
             }
         }
     case 0:
@@ -291,5 +323,27 @@ apu_tick :: proc(a: ^APU) {
             
             a.status.frame_interrupt = 1
         }
+    }
+}
+
+apu_tick_length_counters :: proc(a: ^APU) {
+    if !a.pulse1_length_counter_halt && a.pulse1_length_counter > 0 {
+        a.pulse1_length_counter -= 1
+        trace(.APU, "ticking pulse 1 length counter, now holds %d", a.pulse1_length_counter)
+    }
+
+    if !a.pulse2_length_counter_halt && a.pulse2_length_counter > 0 {
+        a.pulse2_length_counter -= 1
+        trace(.APU, "ticking pulse 2 length counter, now holds %d", a.pulse2_length_counter)
+    }
+
+    if !a.triangle_length_counter_halt && a.triangle_length_counter > 0 {
+        a.triangle_length_counter -= 1
+        trace(.APU, "ticking triangle length counter, now holds %d", a.triangle_length_counter)
+    }
+
+    if !a.noise_length_counter_halt && a.noise_length_counter > 0 {
+        a.noise_length_counter -= 1
+        trace(.APU, "ticking noise length counter, now holds %d", a.noise_length_counter)
     }
 }
