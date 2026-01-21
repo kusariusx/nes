@@ -477,6 +477,12 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 p.sprite_eval_secondary_oam_pos = 0
                 fallthrough
             case 257 ..= 320:
+                // TODO: for some unknown reason, secondary OAM position can become greater than 32 in the middle of sprite 
+                // fetching (from what I've seen, on cycles 276 and 277), leading to out of bounds access. Investigate this.
+                if p.sprite_eval_secondary_oam_pos >= 32 {
+                    break
+                }
+
                 sprite_idx := p.sprite_eval_secondary_oam_pos >> 2
                 
                 // When we have less than 8 sprites on a scanline, we still perform all this fetches but discard
