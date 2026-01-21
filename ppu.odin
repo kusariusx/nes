@@ -322,6 +322,12 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             p.PPUSTATUS.O = 0
         }
 
+        // Regardless of whether rendering is enabled or disabled, reset secondary OAM potision 
+        // so that stale values does not pass onto the next frame.
+        if p.scanline_cycle == 1 || p.scanline_cycle == 257 {
+            p.sprite_eval_secondary_oam_pos = 0
+        }
+
         if p.is_rendering_enabled {
             // Handle OAM corruption - copy 8 OAM bytes into the first 8 bytes of OAM. Target bytes are determind by the
             // corruption "seed" set when rendering is disabled during visible scanline.
@@ -361,7 +367,6 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 case 1: // Sprite evaluation has just started, reset state
                     p.sprite_eval_sprite_byte = 0
                     p.sprite_eval_found = 0
-                    p.sprite_eval_secondary_oam_pos = 0
                     p.sprite_eval_pending_reads = 0
                     p.sprite_eval_done = false
                     p.sprite_eval_sprite_0_present = false
@@ -473,16 +478,7 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
             // Sprite fetching, happens on both visible scanlines and pre-render scanline
             switch p.scanline_cycle {
-            case 257:
-                p.sprite_eval_secondary_oam_pos = 0
-                fallthrough
             case 257 ..= 320:
-                // TODO: for some unknown reason, secondary OAM position can become greater than 32 in the middle of sprite 
-                // fetching (from what I've seen, on cycles 276 and 277), leading to out of bounds access. Investigate this.
-                if p.sprite_eval_secondary_oam_pos >= 32 {
-                    break
-                }
-
                 sprite_idx := p.sprite_eval_secondary_oam_pos >> 2
                 
                 // When we have less than 8 sprites on a scanline, we still perform all this fetches but discard
