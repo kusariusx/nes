@@ -507,6 +507,10 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                     // After we are done with the current sprite, we can make a final increment
                     p.sprite_eval_secondary_oam_pos += 1
 
+                    // Even for left-over sprites (those that cointain $FF data), we still have to do all memory fetches.
+                    // The data is then discarded.
+                    discard_sprite := sprite_idx >= p.sprite_eval_found
+
                     // Edge case - under some conditions it is possible to draw sprites on scanline 0, namely when sprites
                     // are fetched during pre-render scanline and are in-range for scanline 261 & 0xFF = 5.
                     // So, check whether sprite is in range, and replace its pattern with transparent data in case it isn't.
@@ -515,12 +519,16 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                         sprite_in_range := 5 >= sprite_y && 5 < sprite_y + sprite_height
 
                         if !sprite_in_range { // Clear stale pattern data - sprite should not be drawn
-                            p.sprite_shifter_pattern_low[sprite_idx] = 0
-                            p.sprite_shifter_pattern_high[sprite_idx] = 0
+                            discard_sprite = true
+                        }
+                    }
 
-                            if sprite_idx == 0 { // In case we accidentally triggered a sprite 0 hit
-                                p.sprite_0_on_current_scanline = false
-                            }
+                    if discard_sprite { 
+                        p.sprite_shifter_pattern_low[sprite_idx] = 0
+                        p.sprite_shifter_pattern_high[sprite_idx] = 0
+
+                        if sprite_idx == 0 { // In case we accidentally triggered a sprite 0 hit
+                            p.sprite_0_on_current_scanline = false
                         }
                     }
                 }
