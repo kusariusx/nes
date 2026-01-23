@@ -71,8 +71,24 @@ APU :: struct {
     pulse1_sweep_target_period: u16,
 
     pulse2_length_counter: u8,
-    pulse2_length_counter_halt: bool,
+    pulse2_length_counter_halt: bool, // Doubles as envelope loop flag
     pulse2_output: u8,
+    pulse2_timer_period: u16,
+    pulse2_timer_counter: u16,
+    pulse2_duty_cycle: u8,
+    pulse2_duty_cycle_position: u8,
+    pulse2_envelope_volume: u8,
+    pulse2_envelope_divider: u8,
+    pulse2_envelope_decay_counter: u8,
+    pulse2_envelope_start: bool,
+    pulse2_envelope_constant_volume: bool,
+    pulse2_sweep_enabled: bool,
+    pulse2_sweep_divider_period: u8,
+    pulse2_sweep_divider_counter: u8,
+    pulse2_sweep_negate: bool,
+    pulse2_sweep_shift_count: u8,
+    pulse2_sweep_reload: bool,
+    pulse2_sweep_target_period: u16,
 
     triangle_length_counter: u8,
     triangle_length_counter_halt: bool,
@@ -139,11 +155,29 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
         a.pulse1_duty_cycle_position = 0 // Restart sequencer
         a.pulse1_envelope_start = true
     case 0x4004:
+        a.pulse2_duty_cycle = value >> 6
         a.pulse2_length_counter_halt = value & 0b00100000 != 0
+        a.pulse2_envelope_constant_volume = value & 0b00010000 != 0
+        a.pulse2_envelope_volume = value & 0xF
+    case 0x4005:
+        a.pulse2_sweep_enabled = value >> 7 == 1
+        a.pulse2_sweep_divider_period = (value >> 4) & 0b111
+        a.pulse2_sweep_negate = value & 0b00001000 != 0
+        a.pulse2_sweep_shift_count = value & 0b111
+
+        a.pulse2_sweep_reload = true
+    case 0x4006:
+        a.pulse2_timer_period = (a.pulse2_timer_period & 0xFF00) | u16(value)
     case 0x4007:
         if a.status.pulse2 == 1 {
             a.pulse2_length_counter = APU_Length_Counter_Lookup[value >> 3]
         }
+
+        a.pulse2_timer_period = (u16(value & 0b111) << 8) | (a.pulse2_timer_period & 0xFF)
+        
+        a.pulse2_timer_counter = a.pulse2_timer_period + 1
+        a.pulse2_duty_cycle_position = 0
+        a.pulse2_envelope_start = true
     case 0x4008:
         a.triangle_length_counter_halt = value >> 7 == 1
     case 0x400B:
@@ -341,15 +375,34 @@ apu_tick_envelopes :: proc(a: ^APU) {
         a.pulse1_envelope_decay_counter = 15
         a.pulse1_envelope_divider = a.pulse1_envelope_volume
     }
+
+    if !a.pulse2_envelope_start {
+        if a.pulse2_envelope_divider == 0 {
+            a.pulse2_envelope_divider = a.pulse2_envelope_volume + 1
+
+            if a.pulse2_envelope_decay_counter > 0 {
+                a.pulse2_envelope_decay_counter -= 1
+            } else if a.pulse2_length_counter_halt {
+                a.pulse2_envelope_decay_counter = 15
+            }
+        } else {
+            a.pulse2_envelope_divider -= 1
+        }
+    } else {
+        a.pulse2_envelope_start = false
+        a.pulse2_envelope_decay_counter = 15
+        a.pulse2_envelope_divider = a.pulse2_envelope_volume
+    }
 }
 
 apu_tick_sweeps :: proc(a: ^APU) {
     pulse1_change_amount := a.pulse1_timer_period >> a.pulse1_sweep_shift_count
     if a.pulse1_sweep_negate {
-        if pulse1_change_amount > a.pulse1_timer_period {
+        // Pulse1 uses one's complement, meaning it subtracts the value + 1
+        if pulse1_change_amount + 1 > a.pulse1_timer_period {
             a.pulse1_sweep_target_period = 0
         } else {
-            a.pulse1_sweep_target_period = a.pulse1_timer_period - pulse1_change_amount
+            a.pulse1_sweep_target_period = a.pulse1_timer_period - pulse1_change_amount - 1
         }
     } else {
         a.pulse1_sweep_target_period = a.pulse1_timer_period + pulse1_change_amount
@@ -368,6 +421,32 @@ apu_tick_sweeps :: proc(a: ^APU) {
     } else {
         a.pulse1_sweep_divider_counter -= 1
     }
+
+    pulse2_change_amount := a.pulse2_timer_period >> a.pulse2_sweep_shift_count
+    if a.pulse2_sweep_negate {
+        // Pulse2 uses two's complement, meaning just subtracts the value
+        if pulse2_change_amount > a.pulse2_timer_period {
+            a.pulse2_sweep_target_period = 0
+        } else {
+            a.pulse2_sweep_target_period = a.pulse2_timer_period - pulse2_change_amount
+        }
+    } else {
+        a.pulse2_sweep_target_period = a.pulse2_timer_period + pulse2_change_amount
+    }
+
+    if a.pulse2_sweep_divider_counter == 0 && a.pulse2_sweep_enabled && a.pulse2_sweep_shift_count > 0 {
+        muting := a.pulse2_timer_period < 8 || a.pulse2_sweep_target_period > 0x7FF
+        if !muting {
+            a.pulse2_timer_period = a.pulse2_sweep_target_period
+        }
+    }
+
+    if a.pulse2_sweep_divider_counter == 0 || a.pulse2_sweep_reload {
+        a.pulse2_sweep_divider_counter = a.pulse2_sweep_divider_period
+        a.pulse2_sweep_reload = false
+    } else {
+        a.pulse2_sweep_divider_counter -= 1
+    }
 }
 
 apu_update_channels :: proc(a: ^APU) {
@@ -383,6 +462,20 @@ apu_update_channels :: proc(a: ^APU) {
     } else {
         pulse1_volume := a.pulse1_envelope_constant_volume ? a.pulse1_envelope_volume : a.pulse1_envelope_decay_counter
         a.pulse1_output = APU_Pulse_Duty_Cycle_Lookup[a.pulse1_duty_cycle][a.pulse1_duty_cycle_position] * pulse1_volume
+    }
+
+    if a.pulse2_timer_counter == 0 {
+        a.pulse2_timer_counter = a.pulse2_timer_period + 1
+        a.pulse2_duty_cycle_position = (a.pulse2_duty_cycle_position + 1) & 0x7
+    } else {
+        a.pulse2_timer_counter -= 1
+    }
+
+    if a.pulse2_length_counter == 0 || a.pulse2_timer_period < 8 || a.pulse2_sweep_target_period > 0x7FF {
+        a.pulse2_output = 0
+    } else {
+        pulse2_volume := a.pulse2_envelope_constant_volume ? a.pulse2_envelope_volume : a.pulse2_envelope_decay_counter
+        a.pulse2_output = APU_Pulse_Duty_Cycle_Lookup[a.pulse2_duty_cycle][a.pulse2_duty_cycle_position] * pulse2_volume
     }
 }
 
