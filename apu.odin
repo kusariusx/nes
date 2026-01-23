@@ -91,8 +91,14 @@ APU :: struct {
     pulse2_sweep_target_period: u16,
 
     triangle_length_counter: u8,
-    triangle_length_counter_halt: bool,
+    triangle_length_counter_halt: bool, // Doubles as control flag
     triangle_output: u8,
+    triangle_timer_period: u16,
+    triangle_timer_counter: u16,
+    triangle_linear_counter_reload: bool,
+    triangle_linear_counter: u8,
+    triangle_linear_counter_reload_value: u8,
+    triangle_sequencer_position: u8,
 
     noise_length_counter: u8,
     noise_length_counter_halt: bool,
@@ -180,10 +186,17 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
         a.pulse2_envelope_start = true
     case 0x4008:
         a.triangle_length_counter_halt = value >> 7 == 1
+        a.triangle_linear_counter_reload_value = value & 0b1111111
+    case 0x400A:
+        a.triangle_timer_period = (a.triangle_timer_period & 0xFF00) | u16(value)
     case 0x400B:
         if a.status.triangle == 1 {
             a.triangle_length_counter = APU_Length_Counter_Lookup[value >> 3]
         }
+
+        a.triangle_timer_period = (u16(value & 0b111) << 8) | (a.triangle_timer_period & 0xFF)
+
+        a.triangle_linear_counter_reload = true
     case 0x400C:
         a.noise_length_counter_halt = value & 0b00100000 != 0
     case 0x400F:
@@ -242,6 +255,7 @@ apu_tick :: proc(a: ^APU) {
     a.is_read_cycle = !a.is_read_cycle
 
     apu_update_dmc(a)    
+    apu_update_triangle(a)
 
     // Things that need to happen "every APU cycle" (every other CPU cycle)
     if a.is_read_cycle {
@@ -256,7 +270,7 @@ apu_tick :: proc(a: ^APU) {
             }
         }
         
-        apu_update_channels(a)
+        apu_update_pulse(a)
         apu_mix_output(a)        
     }
 
@@ -289,6 +303,7 @@ apu_update_frame_counter :: proc(a: ^APU) {
     case 3728:
         if !a.is_read_cycle {
             apu_tick_envelopes(a)
+            apu_tick_linear_counter(a)
         }
     case 7456:
         if !a.is_read_cycle { 
@@ -296,10 +311,12 @@ apu_update_frame_counter :: proc(a: ^APU) {
             apu_tick_length_counters(a)
             apu_tick_envelopes(a)
             apu_tick_sweeps(a)
+            apu_tick_linear_counter(a)
         }
     case 11185:
         if !a.is_read_cycle {
             apu_tick_envelopes(a)
+            apu_tick_linear_counter(a)
         }
     case 14914:
         if frame_counter_mode == 0 { // 4-step mode
@@ -311,6 +328,7 @@ apu_update_frame_counter :: proc(a: ^APU) {
                 apu_tick_length_counters(a)
                 apu_tick_envelopes(a)
                 apu_tick_sweeps(a)
+                apu_tick_linear_counter(a)
 
                 // Set to 0xFFFF so it wraps around to 0 on next tick
                 a.frame_counter = 0xFFFF
@@ -322,6 +340,7 @@ apu_update_frame_counter :: proc(a: ^APU) {
                 apu_tick_length_counters(a)
                 apu_tick_envelopes(a)
                 apu_tick_sweeps(a)
+                apu_tick_linear_counter(a)
 
                 a.frame_counter = 0xFFFF
             }
@@ -449,7 +468,20 @@ apu_tick_sweeps :: proc(a: ^APU) {
     }
 }
 
-apu_update_channels :: proc(a: ^APU) {
+apu_tick_linear_counter :: proc(a: ^APU) {
+    if a.triangle_linear_counter_reload {
+        a.triangle_linear_counter = a.triangle_linear_counter_reload_value
+    } else if a.triangle_linear_counter > 0 {
+        a.triangle_linear_counter -= 1
+    }
+
+    if !a.triangle_length_counter_halt {
+        a.triangle_linear_counter_reload = false
+    }
+}
+
+apu_update_pulse :: proc(a: ^APU) {
+    // Pulse 1
     if a.pulse1_timer_counter == 0 {
         a.pulse1_timer_counter = a.pulse1_timer_period + 1
         a.pulse1_duty_cycle_position = (a.pulse1_duty_cycle_position + 1) & 0x7 // Tick sequencer
@@ -464,6 +496,7 @@ apu_update_channels :: proc(a: ^APU) {
         a.pulse1_output = APU_Pulse_Duty_Cycle_Lookup[a.pulse1_duty_cycle][a.pulse1_duty_cycle_position] * pulse1_volume
     }
 
+    // Pulse 2
     if a.pulse2_timer_counter == 0 {
         a.pulse2_timer_counter = a.pulse2_timer_period + 1
         a.pulse2_duty_cycle_position = (a.pulse2_duty_cycle_position + 1) & 0x7
@@ -476,6 +509,19 @@ apu_update_channels :: proc(a: ^APU) {
     } else {
         pulse2_volume := a.pulse2_envelope_constant_volume ? a.pulse2_envelope_volume : a.pulse2_envelope_decay_counter
         a.pulse2_output = APU_Pulse_Duty_Cycle_Lookup[a.pulse2_duty_cycle][a.pulse2_duty_cycle_position] * pulse2_volume
+    }
+}
+
+apu_update_triangle :: proc(a: ^APU) {
+    if a.triangle_linear_counter > 0 && a.triangle_length_counter > 0 {
+        if a.triangle_timer_counter == 0 {
+            a.triangle_timer_counter = a.triangle_timer_period + 1
+            a.triangle_sequencer_position = (a.triangle_sequencer_position + 1) & 0x1F
+        } else {
+            a.triangle_timer_counter -= 1
+        }
+
+        a.triangle_output = APU_Triangle_Sequence_Lookup[a.triangle_sequencer_position]
     }
 }
 
