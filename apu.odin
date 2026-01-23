@@ -57,8 +57,8 @@ APU :: struct {
     pulse1_timer_counter: u16,
     pulse1_duty_cycle: u8,
     pulse1_duty_cycle_position: u8,
-    pulse1_envelope_volume: u8,
-    pulse1_envelope_divider: u8,
+    pulse1_envelope_period_volume: u8,
+    pulse1_envelope_divider_counter: u8,
     pulse1_envelope_decay_counter: u8,
     pulse1_envelope_start: bool,
     pulse1_envelope_constant_volume: bool,
@@ -77,8 +77,8 @@ APU :: struct {
     pulse2_timer_counter: u16,
     pulse2_duty_cycle: u8,
     pulse2_duty_cycle_position: u8,
-    pulse2_envelope_volume: u8,
-    pulse2_envelope_divider: u8,
+    pulse2_envelope_period_volume: u8,
+    pulse2_envelope_divider_counter: u8,
     pulse2_envelope_decay_counter: u8,
     pulse2_envelope_start: bool,
     pulse2_envelope_constant_volume: bool,
@@ -103,12 +103,18 @@ APU :: struct {
     noise_length_counter: u8,
     noise_length_counter_halt: bool,
     noise_output: u8,
+    noise_timer_period: u16,
+    noise_timer_counter: u16,
+    noise_mode: bool,
+    noise_envelope_period_volume: u8,
+    noise_envelope_divider_counter: u8,
+    noise_envelope_decay_counter: u8,
+    noise_envelope_start: bool,
+    noise_envelope_constant_volume: bool,
+    noise_lfsr: u16, // 15-bits wide
 
     mixer_output: f32,
-
     mixer_hpf_capacitor: f32,
-    mixer_lpf_output: f32,
-
 }
 
 apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
@@ -139,7 +145,7 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
         a.pulse1_duty_cycle = value >> 6
         a.pulse1_length_counter_halt = value & 0b00100000 != 0
         a.pulse1_envelope_constant_volume = value & 0b00010000 != 0
-        a.pulse1_envelope_volume = value & 0xF
+        a.pulse1_envelope_period_volume = value & 0xF
     case 0x4001:
         a.pulse1_sweep_enabled = value >> 7 == 1
         a.pulse1_sweep_divider_period = (value >> 4) & 0b111
@@ -164,7 +170,7 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
         a.pulse2_duty_cycle = value >> 6
         a.pulse2_length_counter_halt = value & 0b00100000 != 0
         a.pulse2_envelope_constant_volume = value & 0b00010000 != 0
-        a.pulse2_envelope_volume = value & 0xF
+        a.pulse2_envelope_period_volume = value & 0xF
     case 0x4005:
         a.pulse2_sweep_enabled = value >> 7 == 1
         a.pulse2_sweep_divider_period = (value >> 4) & 0b111
@@ -199,10 +205,17 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
         a.triangle_linear_counter_reload = true
     case 0x400C:
         a.noise_length_counter_halt = value & 0b00100000 != 0
+        a.noise_envelope_constant_volume = value & 0b00010000 != 0
+        a.noise_envelope_period_volume = value & 0xF
+    case 0x400E:
+        a.noise_mode = value & 0b10000000 != 0
+        a.noise_timer_period = APU_Noise_Period_Lookup[value & 0xF]
     case 0x400F:
         if a.status.noise == 1 {
             a.noise_length_counter = APU_Length_Counter_Lookup[value >> 3]
         }
+
+        a.noise_envelope_start = true
     case 0x4010: 
         a.dmc_flags = value
 
@@ -256,6 +269,7 @@ apu_tick :: proc(a: ^APU) {
 
     apu_update_dmc(a)    
     apu_update_triangle(a)
+    apu_update_noise(a)
 
     // Things that need to happen "every APU cycle" (every other CPU cycle)
     if a.is_read_cycle {
@@ -377,9 +391,10 @@ apu_tick_length_counters :: proc(a: ^APU) {
 }
 
 apu_tick_envelopes :: proc(a: ^APU) {
+    // Pulse 1
     if !a.pulse1_envelope_start {
-        if a.pulse1_envelope_divider == 0 {
-            a.pulse1_envelope_divider = a.pulse1_envelope_volume + 1
+        if a.pulse1_envelope_divider_counter == 0 {
+            a.pulse1_envelope_divider_counter = a.pulse1_envelope_period_volume + 1
 
             if a.pulse1_envelope_decay_counter > 0 {
                 a.pulse1_envelope_decay_counter -= 1
@@ -387,17 +402,18 @@ apu_tick_envelopes :: proc(a: ^APU) {
                 a.pulse1_envelope_decay_counter = 15
             }
         } else {
-            a.pulse1_envelope_divider -= 1
+            a.pulse1_envelope_divider_counter -= 1
         }
     } else {
         a.pulse1_envelope_start = false
         a.pulse1_envelope_decay_counter = 15
-        a.pulse1_envelope_divider = a.pulse1_envelope_volume
+        a.pulse1_envelope_divider_counter = a.pulse1_envelope_period_volume
     }
 
+    // Pulse 2
     if !a.pulse2_envelope_start {
-        if a.pulse2_envelope_divider == 0 {
-            a.pulse2_envelope_divider = a.pulse2_envelope_volume + 1
+        if a.pulse2_envelope_divider_counter == 0 {
+            a.pulse2_envelope_divider_counter = a.pulse2_envelope_period_volume + 1
 
             if a.pulse2_envelope_decay_counter > 0 {
                 a.pulse2_envelope_decay_counter -= 1
@@ -405,16 +421,36 @@ apu_tick_envelopes :: proc(a: ^APU) {
                 a.pulse2_envelope_decay_counter = 15
             }
         } else {
-            a.pulse2_envelope_divider -= 1
+            a.pulse2_envelope_divider_counter -= 1
         }
     } else {
         a.pulse2_envelope_start = false
         a.pulse2_envelope_decay_counter = 15
-        a.pulse2_envelope_divider = a.pulse2_envelope_volume
+        a.pulse2_envelope_divider_counter = a.pulse2_envelope_period_volume
+    }
+
+    // Noise
+    if !a.noise_envelope_start {
+        if a.noise_envelope_divider_counter == 0 {
+            a.noise_envelope_divider_counter = a.noise_envelope_period_volume + 1
+
+            if a.noise_envelope_decay_counter > 0 {
+                a.noise_envelope_decay_counter -= 1
+            } else if a.noise_length_counter_halt {
+                a.noise_envelope_decay_counter = 15
+            }
+        } else {
+            a.noise_envelope_divider_counter -= 1
+        }
+    } else {
+        a.noise_envelope_start = false
+        a.noise_envelope_decay_counter = 15
+        a.noise_envelope_divider_counter = a.noise_envelope_period_volume
     }
 }
 
 apu_tick_sweeps :: proc(a: ^APU) {
+    // Pulse 1
     pulse1_change_amount := a.pulse1_timer_period >> a.pulse1_sweep_shift_count
     if a.pulse1_sweep_negate {
         // Pulse1 uses one's complement, meaning it subtracts the value + 1
@@ -441,6 +477,7 @@ apu_tick_sweeps :: proc(a: ^APU) {
         a.pulse1_sweep_divider_counter -= 1
     }
 
+    // Pulse 2
     pulse2_change_amount := a.pulse2_timer_period >> a.pulse2_sweep_shift_count
     if a.pulse2_sweep_negate {
         // Pulse2 uses two's complement, meaning just subtracts the value
@@ -492,7 +529,7 @@ apu_update_pulse :: proc(a: ^APU) {
     if a.pulse1_length_counter == 0 || a.pulse1_timer_period < 8 || a.pulse1_sweep_target_period > 0x7FF {
         a.pulse1_output = 0
     } else {
-        pulse1_volume := a.pulse1_envelope_constant_volume ? a.pulse1_envelope_volume : a.pulse1_envelope_decay_counter
+        pulse1_volume := a.pulse1_envelope_constant_volume ? a.pulse1_envelope_period_volume : a.pulse1_envelope_decay_counter
         a.pulse1_output = APU_Pulse_Duty_Cycle_Lookup[a.pulse1_duty_cycle][a.pulse1_duty_cycle_position] * pulse1_volume
     }
 
@@ -507,7 +544,7 @@ apu_update_pulse :: proc(a: ^APU) {
     if a.pulse2_length_counter == 0 || a.pulse2_timer_period < 8 || a.pulse2_sweep_target_period > 0x7FF {
         a.pulse2_output = 0
     } else {
-        pulse2_volume := a.pulse2_envelope_constant_volume ? a.pulse2_envelope_volume : a.pulse2_envelope_decay_counter
+        pulse2_volume := a.pulse2_envelope_constant_volume ? a.pulse2_envelope_period_volume : a.pulse2_envelope_decay_counter
         a.pulse2_output = APU_Pulse_Duty_Cycle_Lookup[a.pulse2_duty_cycle][a.pulse2_duty_cycle_position] * pulse2_volume
     }
 }
@@ -522,6 +559,24 @@ apu_update_triangle :: proc(a: ^APU) {
         }
 
         a.triangle_output = APU_Triangle_Sequence_Lookup[a.triangle_sequencer_position]
+    }
+}
+
+apu_update_noise :: proc(a: ^APU) {
+    if a.noise_timer_counter == 0 {
+        a.noise_timer_counter = a.noise_timer_period + 1
+        
+        feedback_bit: u8 = a.noise_mode ? 6 : 1
+        feedback := (a.noise_lfsr & 1) ~ ((a.noise_lfsr >> feedback_bit) & 1)
+        a.noise_lfsr = (feedback << 14) | (a.noise_lfsr >> 1)
+    } else {
+        a.noise_timer_counter -= 1
+    }
+
+    if a.noise_length_counter == 0 || a.noise_lfsr & 1 == 1 {
+        a.noise_output = 0
+    } else {
+        a.noise_output = a.noise_envelope_constant_volume ? a.noise_envelope_period_volume : a.noise_envelope_decay_counter
     }
 }
 

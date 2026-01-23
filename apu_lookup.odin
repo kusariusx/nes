@@ -19,6 +19,8 @@ APU_Triangle_Sequence_Lookup := []u8{
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
 }
 
+APU_Noise_Period_Lookup := []u16{4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068}
+
 // Pre-calculated lookup tables for calculating mixer output
 
 // Formula: 95.52 / (8128.0 / n + 100)
