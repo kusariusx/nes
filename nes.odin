@@ -134,7 +134,7 @@ nes_debug_run_cpu_instruction :: proc(nes: ^NES) {
     log.infof("A = %02X | X = %02X | Y = %02X | S = %02X", nes.cpu.A, nes.cpu.X, nes.cpu.Y, nes.cpu.S)
     log.infof("-----------------------------------------------")
 
-    for nes.cpu.instruction != nil { // Execture the rest of the instruction
+    for nes.cpu.instruction != nil { // Execute the rest of the instruction
         nes_tick(nes)
     }
 }

@@ -1,6 +1,5 @@
 package main
 
-import "core:log"
 Button_State :: enum {
     Released,
     Pressed,

@@ -11,6 +11,11 @@ NES_SCREEN_HEIGHT :: 240
 WINDOW_WIDTH :: NES_SCREEN_WIDTH * WINDOW_SCALE
 WINDOW_HEIGHT :: NES_SCREEN_HEIGHT * WINDOW_SCALE
 
+AUDIO_SAMPLE_RATE :: 44100
+AUDIO_SAMPLE_BUFFER_SIZE :: AUDIO_SAMPLE_RATE / TARGET_FPS
+CPU_FREQUENCY :: 1789773
+CPU_CYCLES_PER_SAMPLE :: f32(CPU_FREQUENCY) / f32(AUDIO_SAMPLE_RATE)
+
 // NES palette - 64 colors in RGB format (0xRRGGBB)
 NES_PALETTE := [64]u32{
     0x666666, 0x002A88, 0x1412A7, 0x3B00A4, 0x5C007E, 0x6E0040, 0x6C0600, 0x561D00,
@@ -52,6 +57,13 @@ UI :: struct {
     nes: ^NES,
     nes_mappings: NES_Mappings,
     peripheral_mappings: Peripheral_Mappings,
+
+    audio_cycle_counter: f32,
+    audio_sample_sum: f32,
+    audio_sample_count: int,
+    audio_device_id: sdl.AudioDeviceID,
+    audio_buffer: [AUDIO_SAMPLE_BUFFER_SIZE]f32,
+    audio_buffer_position: int,
 }
 
 ui_init :: proc(
@@ -100,6 +112,23 @@ ui_init :: proc(
 		panic("unable to create texture")
 	}
 
+    // Initialize audio
+    res := sdl.Init({.AUDIO})
+    if res != 0 {
+        panic("unable to initialize audio")
+    }
+
+    audio_spec := sdl.AudioSpec{
+        freq = AUDIO_SAMPLE_RATE,
+        format = sdl.AUDIO_F32SYS,
+        channels = 1,
+        samples = AUDIO_SAMPLE_BUFFER_SIZE,
+    }
+
+    audio_device_id := sdl.OpenAudioDevice(nil, false, &audio_spec, nil, nil)
+
+    sdl.PauseAudioDevice(audio_device_id, false) // Unpause audio
+
     return UI{
         window = window,
         renderer = renderer,
@@ -113,6 +142,30 @@ ui_init :: proc(
         nes = nes,
         nes_mappings = nes_mappings,
         peripheral_mappings = peripheral_mappings,
+        audio_device_id = audio_device_id,
+    }
+}
+
+ui_tick_audio :: proc(ui: ^UI) {
+    ui.audio_sample_sum += ui.nes.apu.mixer_output
+    ui.audio_sample_count += 1
+
+    ui.audio_cycle_counter += 1.0
+    if ui.audio_cycle_counter >= CPU_CYCLES_PER_SAMPLE {
+        ui.audio_cycle_counter -= CPU_CYCLES_PER_SAMPLE 
+        
+        ui.audio_buffer[ui.audio_buffer_position] = ui.audio_sample_sum / f32(ui.audio_sample_count)
+        ui.audio_buffer_position += 1
+        
+        ui.audio_sample_sum = 0.0
+        ui.audio_sample_count = 0
+    }
+}
+
+ui_flush_audio :: proc(ui: ^UI) {
+    if ui.audio_buffer_position > 0 {
+        sdl.QueueAudio(ui.audio_device_id, &ui.audio_buffer, u32(ui.audio_buffer_position) * size_of(f32))
+        ui.audio_buffer_position = 0
     }
 }
 
@@ -194,5 +247,9 @@ ui_free :: proc(ui: ^UI) {
     if ui.window != nil {
         sdl.DestroyWindow(ui.window)
     }
+    if ui.audio_device_id != 0 {
+        sdl.CloseAudioDevice(ui.audio_device_id)
+    }
+
     sdl.Quit()
 }

@@ -1,17 +1,15 @@
 package main
 
-import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:os"
-import "core:time"
 
 import sdl "vendor:sdl2"
 
-TARGET_FPS :: 60.0
-FRAME_TIME_MICROSECONDS :: 1000000.0 / TARGET_FPS 
+TARGET_FPS :: 60
+AUDIO_CUSHION_BYTES :: 4096
 
-ROM_PATH :: "test/other/AccuracyCoin/AccuracyCoin.nes"
+ROM_PATH :: "games/Super_mario_brothers.nes"
 
 TRACING_ENABLED := false
 
@@ -64,20 +62,6 @@ main :: proc() {
 			nes_debug_run_cpu_instruction(nes) 
 		}
 	}}
-	// TODO: remove this after testing is done
-	nes_mappings[.P] = #partial {.Down = proc(nes: ^NES) { 
-		buf: [0xFF]byte
-		for i in u16(0) ..< 0xFF {
-			buf[i] = cpu_bus_read(nes.cpu_bus, 0x500 + i)
-		}
-
-		for i in 0 ..< 4 {
-			for j in 0 ..< 32 {
-				fmt.printf("$%02X, ", buf[i*32 + j])
-			}
-			fmt.printf("\n")
-		}
-	}}
 	defer delete(nes_mappings)
 
 	// For now, hardcode the standard controller
@@ -99,28 +83,32 @@ main :: proc() {
 	defer ui_free(&ui)
 
 	for ui_poll_event(&ui) {
-		frame_start := time.tick_now()
-		is_odd_frame := nes.ppu.is_odd_frame
+        // Sync to audio: if we have too much audio queued, then we are running too fast and need to wait.
+		// With this delay, we are saying "wait until all generated samples are played".
+		// Since we generate samples per-frame, this effectively creates a delay to maintain 60 FPS.
+		// We don't know how much "real" time will it take to emulate 1 frame, so let's allow some cushion.
+        for sdl.GetQueuedAudioSize(ui.audio_device_id) > AUDIO_CUSHION_BYTES {
+            sdl.Delay(1)
+        }
 
-		if !nes.breakpoint {
+        if !nes.breakpoint {
 			// Emulate 1 frame
-			for nes.ppu.is_odd_frame == is_odd_frame {
-				nes_tick(nes)
-			}
-		} else {
-			// When breakpoint is active, steps of the system will be controlled by user inputs
+			is_odd_frame := nes.ppu.is_odd_frame
+            for nes.ppu.is_odd_frame == is_odd_frame {
+                nes_tick(nes)
+                ui_tick_audio(&ui)              
+            }
+        } else {
+			// When breakpoint is active, steps of the system will be controlled by user inputs.
+			// Small delay to avoid hot-looping (running as fast as possible) - this is not needed
+			// when breakpoint is active anyway.
+			sdl.Delay(1000 / TARGET_FPS) // Delay to maintain 60 FPS
 		}
-		
-		ui_update_texture(&ui, nes.ppu.framebuffer[:])
-		ui_render(&ui)
-		
-		// Limit to 60 FPS
-		elapsed := time.duration_microseconds(time.tick_since(frame_start))
-		if elapsed < FRAME_TIME_MICROSECONDS {
-			to_sleep := time.Duration(FRAME_TIME_MICROSECONDS - elapsed) * time.Microsecond
-			time.sleep(to_sleep)
-		}
-	}
+        
+		ui_flush_audio(&ui)
+        ui_update_texture(&ui, nes.ppu.framebuffer[:])
+        ui_render(&ui)
+    }
 }
 
 tracking_allocator_report :: proc(track: mem.Tracking_Allocator) {
