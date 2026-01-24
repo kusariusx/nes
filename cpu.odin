@@ -201,8 +201,8 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 
 			bus.apu.dmc_bytes_remaining -= 1
 			if bus.apu.dmc_bytes_remaining == 0  {
-				if bus.apu.dmc_flags & 0b01000000 == 0 { // No loop, assert IRQ if enabled
-					if bus.apu.dmc_flags & 0b10000000 != 0 {
+				if !bus.apu.dmc_loop { // No loop, assert IRQ if enabled
+					if bus.apu.dmc_irq_enabled {
 						trace(.CPU, "requesting DMC IRQ")
 						bus.apu.status.dmc_interrupt = 1
 					}

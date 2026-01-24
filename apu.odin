@@ -36,9 +36,10 @@ APU :: struct {
 
     dmc_toggle_delay: u8,
     dmc_toggle_pending_value: u8,
-    dmc_flags: u8,
-    dmc_rate: u16, // Remember the rate instead of decoding it from rate index every time we need it
-    dmc_rate_counter: u16,
+    dmc_irq_enabled: bool,
+    dmc_loop: bool,
+    dmc_timer_period: u16, // Remember the rate instead of decoding it from rate index every time we need it
+    dmc_timer_counter: u16,
     dmc_output: u8,
     dmc_is_silence: bool,
     dmc_sample_address: u16,
@@ -209,7 +210,7 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
         a.noise_envelope_period_volume = value & 0xF
     case 0x400E:
         a.noise_mode = value & 0b10000000 != 0
-        a.noise_timer_period = APU_Noise_Period_Lookup[value & 0xF]
+        a.noise_timer_period = APU_Noise_Period_Lookup[value & 0xF] - 1
     case 0x400F:
         if a.status.noise == 1 {
             a.noise_length_counter = APU_Length_Counter_Lookup[value >> 3]
@@ -217,16 +218,17 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
 
         a.noise_envelope_start = true
     case 0x4010: 
-        a.dmc_flags = value
+        a.dmc_irq_enabled = value & 0b10000000 != 0
+        a.dmc_loop = value & 0b01000000 != 0
 
         rate := value & 0xF
-        a.dmc_rate = APU_DMC_Rate_Lookup[rate]
+        a.dmc_timer_period = APU_DMC_Period_Lookup[rate]
 
-        if value & 0b10000000 == 0 {
+        if !a.dmc_irq_enabled {
             a.status.dmc_interrupt = 0
         }
 
-        trace(.APU, "set DMC flags to %02X and rate to %v", value, a.dmc_rate)
+        trace(.APU, "set DMC flags to %02X and rate to %v", value, a.dmc_timer_period)
     case 0x4011:
         a.dmc_output = value & 0x7F
     case 0x4012:
@@ -260,6 +262,7 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
             apu_tick_length_counters(a)
             apu_tick_envelopes(a)
             apu_tick_sweeps(a)
+            apu_tick_linear_counter(a)
         }
     }
 }
@@ -520,7 +523,7 @@ apu_tick_linear_counter :: proc(a: ^APU) {
 apu_update_pulse :: proc(a: ^APU) {
     // Pulse 1
     if a.pulse1_timer_counter == 0 {
-        a.pulse1_timer_counter = a.pulse1_timer_period + 1
+        a.pulse1_timer_counter = a.pulse1_timer_period
         a.pulse1_duty_cycle_position = (a.pulse1_duty_cycle_position + 1) & 0x7 // Tick sequencer
     } else {
         a.pulse1_timer_counter -= 1
@@ -535,7 +538,7 @@ apu_update_pulse :: proc(a: ^APU) {
 
     // Pulse 2
     if a.pulse2_timer_counter == 0 {
-        a.pulse2_timer_counter = a.pulse2_timer_period + 1
+        a.pulse2_timer_counter = a.pulse2_timer_period
         a.pulse2_duty_cycle_position = (a.pulse2_duty_cycle_position + 1) & 0x7
     } else {
         a.pulse2_timer_counter -= 1
@@ -552,7 +555,7 @@ apu_update_pulse :: proc(a: ^APU) {
 apu_update_triangle :: proc(a: ^APU) {
     if a.triangle_linear_counter > 0 && a.triangle_length_counter > 0 {
         if a.triangle_timer_counter == 0 {
-            a.triangle_timer_counter = a.triangle_timer_period + 1
+            a.triangle_timer_counter = a.triangle_timer_period
             a.triangle_sequencer_position = (a.triangle_sequencer_position + 1) & 0x1F
         } else {
             a.triangle_timer_counter -= 1
@@ -564,7 +567,7 @@ apu_update_triangle :: proc(a: ^APU) {
 
 apu_update_noise :: proc(a: ^APU) {
     if a.noise_timer_counter == 0 {
-        a.noise_timer_counter = a.noise_timer_period + 1
+        a.noise_timer_counter = a.noise_timer_period
         
         feedback_bit: u8 = a.noise_mode ? 6 : 1
         feedback := (a.noise_lfsr & 1) ~ ((a.noise_lfsr >> feedback_bit) & 1)
@@ -606,10 +609,10 @@ apu_update_dmc :: proc(a: ^APU) {
         }
     }
 
-    if a.dmc_rate_counter == 0 {
-        trace(.APU, "DMC rate tick, rate = %v", a.dmc_rate)
+    if a.dmc_timer_counter == 0 {
+        trace(.APU, "DMC rate tick, rate = %v", a.dmc_timer_period)
 
-        a.dmc_rate_counter = a.dmc_rate
+        a.dmc_timer_counter = a.dmc_timer_period
 
         if !a.dmc_is_silence {
             trace(.APU, "DMC is not silenced, changing output according to delta")
@@ -644,7 +647,7 @@ apu_update_dmc :: proc(a: ^APU) {
         }
     }
     
-    a.dmc_rate_counter -= 1
+    a.dmc_timer_counter -= 1
 }
 
 apu_toggle_dmc :: proc(a: ^APU) {
