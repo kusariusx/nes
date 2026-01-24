@@ -115,7 +115,6 @@ APU :: struct {
     noise_lfsr: u16, // 15-bits wide
 
     mixer_output: f32,
-    mixer_hpf_capacitor: f32,
 }
 
 apu_read_register :: proc(a: ^APU, address: u16) -> (value: u8, mask: u8) {
@@ -678,12 +677,5 @@ apu_toggle_dmc :: proc(a: ^APU) {
 apu_mix_output :: proc(a: ^APU) {
     pulse_output := APU_Mixer_Pulse_Lookup[a.pulse1_output + a.pulse2_output]
     triangle_noise_dmc_output := APU_Mixer_Triangle_Noise_DMC_Lookup[3 * a.triangle_output + 2 * a.noise_output + a.dmc_output]
-
-    raw_output := pulse_output + triangle_noise_dmc_output
-
-    // Apply high-pass filter to prevent sudden signal changes
-    filtered_output := raw_output - a.mixer_hpf_capacitor
-    a.mixer_hpf_capacitor = raw_output - filtered_output * APU_HIGH_PASS_FILTER_DECAY
-
-    a.mixer_output = filtered_output
+    a.mixer_output = pulse_output + triangle_noise_dmc_output
 }
