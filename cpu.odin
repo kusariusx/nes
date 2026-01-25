@@ -83,6 +83,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	// Alternate between read and write cycles
 	cpu.is_read_cycle = !cpu.is_read_cycle
 
+	// TODO: move all DMA related stuff into a separate module
 	dmc_dma_dummy_read, oam_dma_dummy_read: bool
 	dmc_dma_action, oam_dma_action: bool
 

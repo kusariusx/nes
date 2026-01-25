@@ -3,8 +3,9 @@ package main
 import "core:mem"
 import "core:math"
 
-BLIP_BUFFER_LOW_PASS  :: 0.996
-BLIP_BUFFER_HIGH_PASS :: 0.999
+// TODO: how to calculate actual cutoff frequency from these values?
+BLIP_BUFFER_LOW_PASS  :: 0.990 // Lower value - smaller cutoff frequency/less highs
+BLIP_BUFFER_HIGH_PASS :: 0.996 // Lower value - higher cutoff frequency/less bass
 
 BLIP_BUFFER_PHASE_COUNT :: 32
 BLIP_BUFFER_STEP_WIDTH  :: 16
@@ -18,6 +19,8 @@ Blip_Buffer :: struct {
 }
 
 blip_buffer_init_steps :: proc() {
+    // Most of this is directly rewritten from C++ reference implementation by Blargg
+
     master: [BLIP_BUFFER_MASTER_SIZE]f64 = ---
     for i in 0 ..< BLIP_BUFFER_MASTER_SIZE {
         master[i] = 0.5
@@ -74,10 +77,14 @@ blip_buffer_prepare :: proc(b: ^Blip_Buffer) {
         sum *= BLIP_BUFFER_HIGH_PASS
     }
 
+    // Remember current sum to preserve continuity between buffers
     b.integrator_sum = sum
 }
 
 blip_buffer_clear :: proc(b: ^Blip_Buffer) {
+    // Copy the tail of the buffer to the start so that we preserve continuity
     copy(b.buffer[:BLIP_BUFFER_STEP_WIDTH], b.buffer[AUDIO_SAMPLE_BUFFER_SIZE:])
+
+    // Zero the rest of the buffer
     mem.zero_slice(b.buffer[BLIP_BUFFER_STEP_WIDTH:])
 }

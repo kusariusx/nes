@@ -43,7 +43,6 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
         return nil, err_mapper
     }
 
-    // TODO: is this really needed?
     apu.dmc_bits_remaining = 8
     apu.dmc_sample_buffer_is_empty = true
     apu.dmc_is_silence = true
