@@ -25,7 +25,7 @@ MMC3 :: struct{
     irq_enabled: bool,
 
     ppu_a12_prev: u16,
-    ppu_a12_last_rising_edge_clock: u64,
+    ppu_a12_last_high_clock: u64,
     cpu: ^CPU,
     ppu_bus: ^NES_PPU_Bus,
 
@@ -65,6 +65,9 @@ mmc3_cpu_read :: proc(m: ^MMC3, r: ^ROM, address: u16) -> (value: u8, mask: u8) 
 }
 
 mmc3_cpu_write :: proc(m: ^MMC3, r: ^ROM, address: u16, value: u8) -> (write_handled: bool) {
+    prg_rom_banks := r.header.prg_rom_banks * 2
+    chr_rom_banks := r.header.chr_rom_banks * 8 // Header uses 0x2000 byte banks but MMC3 operates with 0x400 banks
+    
     switch address {
     case 0x6000 ..= 0x7FFF:
         if r.header.prg_ram_size > 0 && m.prg_ram_protect.prg_ram_enabled == 1 && m.prg_ram_protect.write_protection == 0 {
@@ -82,8 +85,16 @@ mmc3_cpu_write :: proc(m: ^MMC3, r: ^ROM, address: u16, value: u8) -> (write_han
             switch m.bank_select.bank_register {
             case 0, 1: // R0 and R1 ignore the bottom bit
                 value &= 0b11111110
+                fallthrough
+            case 2, 3, 4, 5:
+                if chr_rom_banks > 0 { // Limit CHR bank number
+                    value %= chr_rom_banks
+                }
             case 6, 7: // R6 and R7 ignore the top two bits
                 value &= 0b00111111
+                if prg_rom_banks > 0 { // Limit PRG bank number
+                    value %= prg_rom_banks
+                }
             }
 
             m.bank_register[m.bank_select.bank_register] = value
@@ -203,17 +214,17 @@ mmc3_ppu_write :: proc(m: ^MMC3, r: ^ROM, address: u16, value: u8) -> (write_han
 
 mmc3_handle_event :: proc(m: ^MMC3, event: System_Event) {
     is_rising_edge :: proc(m: ^MMC3) -> bool {
-        rising_edge_delay :: 6 // CPU cycles (5-23)
+        minimum_delay :: 5 // CPU cycles
 
         ppu_a12 := (m.ppu_bus.address_bus_value >> 12) & 1
         rising_edge := false
 
-        if m.ppu_a12_prev == 0 && ppu_a12 == 1 {
-            if m.cpu.clock - m.ppu_a12_last_rising_edge_clock > rising_edge_delay {
+        if ppu_a12 == 1 {
+            if m.ppu_a12_prev == 0 && m.cpu.clock - m.ppu_a12_last_high_clock >= minimum_delay {
                 rising_edge = true
             }
 
-            m.ppu_a12_last_rising_edge_clock = m.cpu.clock
+            m.ppu_a12_last_high_clock = m.cpu.clock
         }
 
         m.ppu_a12_prev = ppu_a12

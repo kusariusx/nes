@@ -19,6 +19,7 @@ Mapper :: union {
     ^NROM,
     ^MMC1,
     ^MMC3,
+    ^UxROM,
 }
 
 mapper_cpu_read :: proc(mapper: Mapper, rom: ^ROM, address: u16) -> (value: u8, mask: u8) {
@@ -29,6 +30,8 @@ mapper_cpu_read :: proc(mapper: Mapper, rom: ^ROM, address: u16) -> (value: u8, 
         return mmc1_cpu_read(m, rom, address)
     case ^MMC3: 
         return mmc3_cpu_read(m, rom, address)
+    case ^UxROM: 
+        return uxrom_cpu_read(m, rom, address)
     }
 
     // Should not happen as the switch is exhaustive
@@ -43,6 +46,8 @@ mapper_cpu_write :: proc(mapper: Mapper, rom: ^ROM, address: u16, value: u8) -> 
         return mmc1_cpu_write(m, rom, address, value)
     case ^MMC3: 
         return mmc3_cpu_write(m, rom, address, value)
+    case ^UxROM: 
+        return uxrom_cpu_write(m, rom, address, value)
     }
 
     return false
@@ -56,6 +61,8 @@ mapper_ppu_read :: proc(mapper: Mapper, rom: ^ROM, address: u16) -> (value: u8, 
         return mmc1_ppu_read(m, rom, address)
     case ^MMC3: 
         return mmc3_ppu_read(m, rom, address)
+    case ^UxROM:
+        return uxrom_ppu_read(m, rom, address)
     }
 
     return 0, 0
@@ -69,6 +76,8 @@ mapper_ppu_write :: proc(mapper: Mapper, rom: ^ROM, address: u16, value: u8) -> 
         return mmc1_ppu_write(m, rom, address, value)
     case ^MMC3: 
         return mmc3_ppu_write(m, rom, address, value)
+    case ^UxROM:
+        return uxrom_ppu_write(m, rom, address, value)
     }
 
     return false
@@ -99,6 +108,8 @@ mapper_init :: proc(nes: ^NES) -> (mapper: Mapper, err: Mapper_Initialization_Er
             control = 0x0C,
             vram = nes.ppu_bus.vram[:],
         })
+    case 2:
+        mapper, err_alloc = new(UxROM)
     case 4:
         mapper, err_alloc = new_clone(MMC3{
             cpu = nes.cpu,
@@ -126,6 +137,8 @@ mapper_free :: proc(mapper: Mapper) {
     case ^MMC1:
         free(m)
     case ^MMC3:
+        free(m)
+    case ^UxROM:
         free(m)
 	}
 }
