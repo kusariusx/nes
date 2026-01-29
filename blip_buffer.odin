@@ -5,7 +5,7 @@ import "core:math"
 
 // TODO: how to calculate actual cutoff frequency from these values?
 BLIP_BUFFER_LOW_PASS  :: 0.990 // Lower value - smaller cutoff frequency/less highs
-BLIP_BUFFER_HIGH_PASS :: 0.996 // Lower value - higher cutoff frequency/less bass
+BLIP_BUFFER_HIGH_PASS :: 0.980 // Lower value - higher cutoff frequency/less bass
 
 BLIP_BUFFER_PHASE_COUNT :: 32
 BLIP_BUFFER_STEP_WIDTH  :: 16

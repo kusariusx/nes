@@ -130,17 +130,17 @@ test_fetch_nametable_byte :: proc(t: ^testing.T) {
 
     // Fetch from first nametable
     ppu.v = 0x2000 // Points to 0x2000
-    result := ppu_fetch_nametable_byte(&ppu, &bus)
+    result := ppu_fetch_background_nametable_byte(&ppu, &bus)
     testing.expect_value(t, result, u8(0x42))
 
     // Fetch from end of first nametable
     ppu.v = 0x23FF // Points to 0x23FF
-    result = ppu_fetch_nametable_byte(&ppu, &bus)
+    result = ppu_fetch_background_nametable_byte(&ppu, &bus)
     testing.expect_value(t, result, u8(0x99))
 
     // Fetch with fine Y bits set (should be masked out)
     ppu.v = 0x7000 // Fine Y = 7, address still 0x2000
-    result = ppu_fetch_nametable_byte(&ppu, &bus)
+    result = ppu_fetch_background_nametable_byte(&ppu, &bus)
     testing.expect_value(t, result, u8(0x42))
 }
 
@@ -161,22 +161,22 @@ test_fetch_attribute_byte :: proc(t: ^testing.T) {
 
     // Top-left quadrant (coarse_x = 0, coarse_y = 0)
     ppu.v = 0x2000
-    result := ppu_fetch_attribute_byte(&ppu, &bus)
+    result := ppu_fetch_background_attribute_byte(&ppu, &bus)
     testing.expect_value(t, result, u8(0b00))
 
     // Top-right quadrant (coarse_x = 2, coarse_y = 0)
     ppu.v = 0x2002
-    result = ppu_fetch_attribute_byte(&ppu, &bus)
+    result = ppu_fetch_background_attribute_byte(&ppu, &bus)
     testing.expect_value(t, result, u8(0b01))
 
     // Bottom-left quadrant (coarse_x = 0, coarse_y = 2)
     ppu.v = 0x2040
-    result = ppu_fetch_attribute_byte(&ppu, &bus)
+    result = ppu_fetch_background_attribute_byte(&ppu, &bus)
     testing.expect_value(t, result, u8(0b10))
 
     // Bottom-right quadrant (coarse_x = 2, coarse_y = 2)
     ppu.v = 0x2042
-    result = ppu_fetch_attribute_byte(&ppu, &bus)
+    result = ppu_fetch_background_attribute_byte(&ppu, &bus)
     testing.expect_value(t, result, u8(0b11))
 }
 
@@ -206,28 +206,28 @@ test_fetch_pattern_byte :: proc(t: ^testing.T) {
     // Fetch low plane, row 0
     ppu.PPUCTRL.B = 0 // Pattern table 0
     ppu.v = 0x0000 // Fine Y = 0
-    result := ppu_fetch_pattern_byte(&ppu, &bus, 0x05, 0)
+    result := ppu_fetch_background_pattern_byte(&ppu, &bus, 0x05, 0)
     testing.expect_value(t, result, u8(0xAA))
 
     // Fetch low plane, row 3
     ppu.v = 0x3000 // Fine Y = 3
-    result = ppu_fetch_pattern_byte(&ppu, &bus, 0x05, 0)
+    result = ppu_fetch_background_pattern_byte(&ppu, &bus, 0x05, 0)
     testing.expect_value(t, result, u8(0xBB))
 
     // Fetch high plane, row 0
     ppu.v = 0x0000 // Fine Y = 0
-    result = ppu_fetch_pattern_byte(&ppu, &bus, 0x05, 1)
+    result = ppu_fetch_background_pattern_byte(&ppu, &bus, 0x05, 1)
     testing.expect_value(t, result, u8(0xCC))
 
     // Fetch high plane, row 3
     ppu.v = 0x3000 // Fine Y = 3
-    result = ppu_fetch_pattern_byte(&ppu, &bus, 0x05, 1)
+    result = ppu_fetch_background_pattern_byte(&ppu, &bus, 0x05, 1)
     testing.expect_value(t, result, u8(0xDD))
 
     // Test pattern table 1 (0x1000)
     rom.chr_rom[0x1000 + tile_offset + 0] = 0xEE
     ppu.PPUCTRL.B = 1 // Pattern table 1
     ppu.v = 0x0000
-    result = ppu_fetch_pattern_byte(&ppu, &bus, 0x05, 0)
+    result = ppu_fetch_background_pattern_byte(&ppu, &bus, 0x05, 0)
     testing.expect_value(t, result, u8(0xEE))
 }

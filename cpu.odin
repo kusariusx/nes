@@ -47,13 +47,19 @@ CPU :: struct {
 	nmi_latch: bool,
 	irq_latch: bool, 
 
+	irq_external_line: bool,
+	just_polled_interrupts: bool,
+
 	// NMI flip-flop is polled at discrete intervals (not continuously) - we handle NMI only when flip-flop is active during polling
 	nmi_pending: bool,
 
 	interrupt_vector: u16,
 
 	// To control DMA cadence - DMAs can only start on read cycles. If they start on write cycles, they wait.
+	// TODO: with the new `clock` variable, is this even needed?
 	is_read_cycle: bool,
+
+	clock: u64,
 
 	// Indicates that the CPU will write to the bus on the next cycle - used to determine when to start DMC DMA.
 	// DMC DMA cannot halt the CPU on the cycle when it writes to the bus. In such case, DMC DMA waits and tries to 
@@ -313,6 +319,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
 
 	cpu.instruction_cycle += 1
+	cpu.clock += 1
 	cpu.was_halted = false
 
 	cpu_detect_nmi(cpu, bus)
@@ -360,11 +367,24 @@ cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
 	// IRQ line will stay low/active until all interrupt sources acknowledge their interrupt.
 	c.irq_latch = 
 		b.apu.status.frame_interrupt == 1 || // APU Frame Counter
-		b.apu.status.dmc_interrupt == 1 // APU DMC
+		b.apu.status.dmc_interrupt == 1 || // APU DMC
+		c.irq_external_line // Any external IRQ signal like MMC3 mapper
 
 	c.irq_latch &&= c.P.I == 0
 
-	trace(.CPU, "interrupt polling: NMI %t, IRQ %t", c.nmi_latch, c.irq_latch)
+	c.just_polled_interrupts = true
+
+	trace(.CPU, "(%d, %d) interrupt polling: NMI %t, IRQ %t", b.ppu.scanline, b.ppu.scanline_cycle, c.nmi_latch, c.irq_latch)
+}
+
+// This is used by external systems like mappers to request an IRQ
+cpu_trigger_external_irq :: proc(c: ^CPU) {
+	if c.just_polled_interrupts && c.P.I == 0 {
+		trace(.CPU, "external IRQ triggered just as interrupts were polled - allowing IRQ")
+		c.irq_latch = true
+	}
+
+	c.irq_external_line = true
 }
 
 cpu_tick_test_bus :: proc(cpu: ^CPU, bus: ^Test_CPU_Bus) {
@@ -376,7 +396,7 @@ cpu_tick_test_bus :: proc(cpu: ^CPU, bus: ^Test_CPU_Bus) {
 		
 		cpu.instruction_cycle = 1
 		cpu.PC += 1
-	} 
+	}
 
 	cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
 	cpu.instruction_cycle += 1

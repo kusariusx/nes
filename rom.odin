@@ -84,12 +84,14 @@ rom_parse :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
         flags_7 = auto_cast data[7],
     }
 
-    if rom.header.flags_7.nes_2_0 != 2 {
-        rom.header.format_specific_flags = INES_Header_Data{
-            flags_8 = data[8],
-            flags_9 = auto_cast data[9],
-            flags_10 = auto_cast data[10],
-        }
+    rom.header.format_specific_flags = INES_Header_Data{
+        flags_8 = data[8],
+        flags_9 = auto_cast data[9],
+        flags_10 = auto_cast data[10],
+    }
+
+    if rom.header.flags_7.nes_2_0 == 2 {
+        // Parse flags 8-15 using iNES 2.0 format
     }
 
     // Optional trainer

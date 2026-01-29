@@ -26,6 +26,8 @@ NES_Init_Error :: union #shared_nil {
 }
 
 nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
+    // TODO: refactor this procedure, it looks messy and hard to follow
+
     ppu := new(PPU) or_return
 	apu := new(APU) or_return
     cpu := new(CPU) or_return
@@ -37,7 +39,17 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
 
     rom := rom_parse(rom_data) or_return
 
-    mapper, err_mapper := mapper_init(rom, ppu_bus.vram[:])
+    nes = new_clone(NES{
+        rom = rom,
+        ppu = ppu,
+        apu = apu,
+        cpu = cpu,
+        ppu_bus = ppu_bus,
+        cpu_bus = cpu_bus,
+        io = io,
+    }) or_return
+
+    mapper, err_mapper := mapper_init(nes)
     if err_mapper != nil {
         rom_free(rom)
         return nil, err_mapper
@@ -48,6 +60,7 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
     apu.dmc_is_silence = true
     apu.noise_lfsr = 1
 
+    ppu_bus.cpu = cpu
 	ppu_bus.cpu_bus = cpu_bus
     ppu_bus.rom = rom
     ppu_bus.mapper = mapper
@@ -59,16 +72,8 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
     cpu_bus.mapper = mapper
     cpu_bus.io = io
 
-    return new_clone(NES{
-        rom = rom,
-        mapper = mapper,
-        ppu = ppu,
-        apu = apu,
-        cpu = cpu,
-        ppu_bus = ppu_bus,
-        cpu_bus = cpu_bus,
-        io = io,
-    })
+    nes.mapper = mapper
+    return nes, nil
 }
 
 nes_free :: proc(nes: ^NES) {

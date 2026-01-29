@@ -187,6 +187,7 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
 
         // Auto-increment v based on PPUCTRL.I
         p.v += p.PPUCTRL.I == 0 ? 1 : 32
+        ppu_bus_set_address(b, p.v)
 
         p.io_bus_value = result
     case:
@@ -263,12 +264,15 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
             p.t = (p.t & 0b11111111_00000000) | u16(value) // Set bits 0-7
             p.v = p.t // Copy t into v
             p.w = 0 // Toggle w back
+
+            ppu_bus_set_address(b, p.v)
         }
     case 7: // PPUDATA
         ppu_bus_write(b, p.v, value)
 
         // Auto-increment v based on PPUCTRL.I
         p.v += p.PPUCTRL.I == 0 ? 1 : 32
+        ppu_bus_set_address(b, p.v)
 
         // TODO: when writing during rendering, instead of auto-increment, v is updated in a weird way,
         // causing simultaneous coarse X increment and Y increment.
@@ -322,8 +326,8 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             p.PPUSTATUS.O = 0
         }
 
-        // Regardless of whether rendering is enabled or disabled, reset secondary OAM potision 
-        // so that stale values does not pass onto the next frame.
+        // Regardless of whether rendering is enabled or disabled, reset secondary OAM position 
+        // so that stale values do not pass onto the next frame.
         if p.scanline_cycle == 1 || p.scanline_cycle == 257 {
             p.sprite_eval_secondary_oam_pos = 0
         }
@@ -487,14 +491,14 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 case 1: // Read Y
                     p.sprite_y_position = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
                     p.sprite_eval_secondary_oam_pos += 1
-                    ppu_fetch_nametable_byte(p, b) // Dummy nametable fetch (at cycles 1-2)
+                    ppu_fetch_background_nametable_byte(p, b) // Dummy nametable fetch (at cycles 1-2)
                 case 2: // Read tile number
                     p.sprite_tile_number = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
                     p.sprite_eval_secondary_oam_pos += 1
                 case 3: // Read attributes
                     p.sprite_attributes[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
                     p.sprite_eval_secondary_oam_pos += 1
-                    ppu_fetch_nametable_byte(p, b) // Dummy nametable fetch (at cycles 3-4)
+                    ppu_fetch_background_nametable_byte(p, b) // Dummy nametable fetch (at cycles 3-4)
                 case 4: // Read X
                     p.sprite_x_position[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
 
@@ -598,14 +602,14 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
                 // Calculate palette RAM address
                 // If color is 0, it's transparent - use backdrop color
-                palette_address: u16
+                palette_entry: u16
                 if color == 0 {
-                    palette_address = 0x3F00 // Backdrop color
+                    palette_entry = 0 // Backdrop color
                 } else {
-                    palette_address = 0x3F00 + (palette << 2) + color
+                    palette_entry = (palette << 2) + color
                 }
-                
-                color_index := ppu_bus_read(b, palette_address)
+
+                color_index := ppu_bus_read_palette_ram(b, palette_entry)
                 
                 // Write to framebuffer
                 pixel_index := p.scanline * 256 + pixel_x
@@ -616,19 +620,19 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             if is_rendering_cycle || is_prefetch_cycle {
                 switch p.scanline_cycle % 8 {
                 case 1:
-                    ppu_load_shifters(p)
-                    p.bg_next_tile_id = ppu_fetch_nametable_byte(p, b)
+                    ppu_load_background_shifters(p)
+                    p.bg_next_tile_id = ppu_fetch_background_nametable_byte(p, b)
                 case 3:
-                    p.bg_next_tile_palette = ppu_fetch_attribute_byte(p, b)
+                    p.bg_next_tile_palette = ppu_fetch_background_attribute_byte(p, b)
                 case 5:
-                    p.bg_next_tile_pattern_low = ppu_fetch_pattern_byte(p, b, p.bg_next_tile_id, LOW)
+                    p.bg_next_tile_pattern_low = ppu_fetch_background_pattern_byte(p, b, p.bg_next_tile_id, LOW)
                 case 7:
-                    p.bg_next_tile_pattern_high = ppu_fetch_pattern_byte(p, b, p.bg_next_tile_id, HIGH)
+                    p.bg_next_tile_pattern_high = ppu_fetch_background_pattern_byte(p, b, p.bg_next_tile_id, HIGH)
                 case 0:
                     ppu_increment_coarse_x(p)
                 }
 
-                ppu_shift_registers(p)
+                ppu_shift_background_registers(p)
             }
             
             if p.scanline_cycle == 256 {
@@ -684,6 +688,13 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             p.is_odd_frame = !p.is_odd_frame
         }
     }
+
+    // It is possible for PPU cycle to happen simultaneously with interrupt polling. Some IRQ sources
+    // like MMC3 mapper (which observes 12th bit on the PPU's address bus) trigger an IRQ during the PPU cycle,
+    // and we need to somehow let the CPU know that an IRQ line went up, even though CPU wasn't able to detect it
+    // because of the sequential nature of the emulator (CPU runs strictly after the PPU, but in reality they all
+    // run at the same time).
+    b.cpu.just_polled_interrupts = false
 }
 
 // Finds sprite pixel that needs to be drawn.
@@ -818,13 +829,13 @@ ppu_transfer_y :: proc(p: ^PPU) {
 }
 
 // Fetch nametable byte (tile ID) using current v address
-ppu_fetch_nametable_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
+ppu_fetch_background_nametable_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
     address := 0x2000 | (p.v & 0x0FFF)
     return ppu_bus_read(b, address)
 }
 
 // Fetch attribute byte (palette number) using current v address
-ppu_fetch_attribute_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
+ppu_fetch_background_attribute_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
     address := 0x23C0 | (p.v & 0x0C00) | ((p.v >> 4) & 0x38) | ((p.v >> 2) & 0x07)
     attribute_byte := ppu_bus_read(b, address)
     
@@ -840,7 +851,7 @@ ppu_fetch_attribute_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
 }
 
 // Fetch pattern byte (tile pixel data) for given plane
-ppu_fetch_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, tile_id: u8, plane: u8) -> u8 {
+ppu_fetch_background_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, tile_id: u8, plane: u8) -> u8 {
     pattern_table_base := u16(p.PPUCTRL.B) * 0x1000
     
     // Each tile is 16 bytes (8 bytes for low plane, 8 bytes for high plane)
@@ -852,7 +863,7 @@ ppu_fetch_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, tile_id: u8, plane: u8)
     return ppu_bus_read(b, address)
 }
 
-ppu_load_shifters :: proc(p: ^PPU) {
+ppu_load_background_shifters :: proc(p: ^PPU) {
     // Load pattern data into low 8 bits of shifters
     p.bg_shifter_pattern_low = (p.bg_shifter_pattern_low & 0xFF00) | u16(p.bg_next_tile_pattern_low)
     p.bg_shifter_pattern_high = (p.bg_shifter_pattern_high & 0xFF00) | u16(p.bg_next_tile_pattern_high)
@@ -865,7 +876,7 @@ ppu_load_shifters :: proc(p: ^PPU) {
     p.bg_shifter_palette_high = (p.bg_shifter_palette_high & 0xFF00) | palette_high
 }
 
-ppu_shift_registers :: proc(p: ^PPU) {
+ppu_shift_background_registers :: proc(p: ^PPU) {
     // For high bitplane of background pattern, 1 is shifted into the low bit of the shifter, instead of 0.
     // Usually, these 1's are overwritten with tile data when shifters are loaded every 8 cycles. But, if
     // rendering is disabled and enabled at some very precise moments (disable before load, enable right after load), 

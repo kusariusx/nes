@@ -3,6 +3,7 @@ package main
 NES_CPU_Bus :: struct {
 	ram: [2 * 1024]u8, // 2 KB internal RAM
 
+    // TODO: instead of all these links, maybe just link all components directly to the NES object itself?
     ppu: ^PPU,
     ppu_bus: ^NES_PPU_Bus,
 
@@ -13,6 +14,7 @@ NES_CPU_Bus :: struct {
 
     io: ^IO,
 
+    // TODO: move this into a separate DMA module
     oam_dma_perform_alignment_cycle: bool,
     oam_dma_pending: bool,
     oam_dma_active: bool,
