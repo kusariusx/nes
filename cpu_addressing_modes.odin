@@ -8,6 +8,7 @@ imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU
     case 2:
         // Fetch value, increment PC
         value := cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(value)
         cpu.PC += 1
 
         // Perform action
@@ -24,6 +25,7 @@ zpg_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus
     case 2:
         // Fetch address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
 
         cpu_poll_interrupts(cpu, bus)
@@ -44,6 +46,7 @@ zpgi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action
     case 2:
         // Fetch address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Read from address, add index to it
@@ -66,10 +69,12 @@ abs_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus
     case 2:
         // Fetch low byte of address, increment PC
         cpu.instruction_operands.bytes[LOW] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[LOW])
         cpu.PC += 1
     case 3:
         // Fetch high byte of address, increment PC
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[HIGH])
         cpu.PC += 1
 
         cpu_poll_interrupts(cpu, bus)
@@ -88,10 +93,12 @@ absi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action
     case 2:
         // Fetch low byte of address, increment PC
         cpu.instruction_operands.bytes[LOW] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[LOW])
         cpu.PC += 1
     case 3:
         // Fetch high byte of address, add index to low address byte, increment PC
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[HIGH])
         cpu.instruction_operands.bytes[LOW] += index_register
         cpu.PC += 1
 
@@ -130,6 +137,7 @@ indx_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bu
         // Fetch pointer address
         // Both instruction_operand and instruction_operands are used to keep the pointer zero-page address and effective address
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Read from pointer address (on zero page), add X to pointer address
@@ -157,6 +165,7 @@ indy_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bu
     switch cycle {
     case 2:
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Fetch effective address low byte
@@ -196,6 +205,7 @@ zpg_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(c
     case 2:
         // Fetch address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Read from effective address
@@ -222,6 +232,7 @@ zpgi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_registe
     case 2:
         // Fetch address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Read from address, add index to it
@@ -253,10 +264,12 @@ abs_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(c
     case 2:
         // Fetch low byte of address, increment PC
         cpu.instruction_operands.bytes[LOW] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[LOW])
         cpu.PC += 1
     case 3:
         // Fetch high byte of address, increment PC
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[HIGH])
         cpu.PC += 1
     case 4:    
         // Read from effective address
@@ -284,10 +297,12 @@ absi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_registe
     case 2:
         // Fetch low byte of address, increment PC
         cpu.instruction_operands.bytes[LOW] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[LOW])
         cpu.PC += 1
     case 3:
         // Fetch high byte of address, add index to low address byte, increment PC
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[HIGH])
         cpu.instruction_operands.bytes[LOW] += index_register
         cpu.PC += 1
     case 4:
@@ -327,6 +342,7 @@ rel :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, should_branch: bool) {
         // Fetch operand, increment PC
         // If branch is not taken - done
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
 
         if !should_branch {
@@ -384,6 +400,7 @@ zpg_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
     case 2:
         // Fetch address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
 
         cpu_poll_interrupts(cpu, bus)
@@ -402,6 +419,7 @@ zpgi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value
     case 2:
         // Fetch address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Read from address, add index to it
@@ -424,10 +442,12 @@ abs_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
     case 2:
         // Fetch low byte of address, increment PC
         cpu.instruction_operands.bytes[LOW] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[LOW])
         cpu.PC += 1
     case 3:
         // Fetch high byte of address, increment PC
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[HIGH])
         cpu.PC += 1
 
         cpu_poll_interrupts(cpu, bus)
@@ -446,10 +466,12 @@ absi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value
     case 2:
         // Fetch low byte of address, increment PC
         cpu.instruction_operands.bytes[LOW] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[LOW])
         cpu.PC += 1
     case 3:
         // Fetch high byte of address, add index to low address byte, increment PC
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[HIGH])
         cpu.instruction_operands.bytes[LOW] += index_register
         cpu.PC += 1
     case 4:
@@ -476,6 +498,7 @@ indx_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
     case 2:
         // Fetch pointer address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Read from pointer address (on zero page), add X to pointer address
@@ -504,6 +527,7 @@ indy_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
     case 2:
         // Fetch pointer address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Fetch effective address low byte
@@ -536,6 +560,7 @@ indx_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(
     case 2:
         // Fetch pointer address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Read from pointer address (on zero page), add X to pointer address
@@ -573,6 +598,7 @@ indy_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(
     case 2:
         // Fetch pointer address, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Fetch effective address low byte

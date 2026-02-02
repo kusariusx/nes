@@ -3,15 +3,20 @@ package main
 import "core:log"
 import "core:mem"
 import "core:os"
+import "core:flags"
 
 import sdl "vendor:sdl2"
 
 TARGET_FPS :: 60
 AUDIO_CUSHION_BYTES :: 4096
 
-ROM_PATH :: "games/Super_mario_brothers.nes"
+Config :: struct {
+	rom: os.Handle `args:"pos=0,required,file=r" usage:"Path to ROM"`,
 
-TRACING_ENABLED := false
+	// Hidden flags, used only in debug build mode
+	tracing_enabled: bool `args:"hidden" usage:"Enable generating tracelogs"`,
+	disassemble_into: os.Handle `args:"hidden,file=cw" usage:"Disassemble what CPU executes into a provided file"`,
+}
 
 main :: proc() {
 	when ODIN_DEBUG {
@@ -27,12 +32,27 @@ main :: proc() {
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
-	rom_data, err_read := os.read_entire_file_from_filename_or_err(ROM_PATH)
+	// Parse config
+	config: Config
+	flags.parse_or_exit(&config, os.args)
+
+	TRACING_ENABLED = config.tracing_enabled
+
+	if config.disassemble_into != 0 {
+		stream := os.stream_from_handle(config.disassemble_into)
+		disassembler_set_output_stream(stream)
+	}
+	defer if config.disassemble_into != 0 {
+		os.close(config.disassemble_into)
+	}
+
+	rom_data, err_read := os.read_entire_file_or_err(config.rom)
 	if err_read != nil {
 		log.errorf("unable to read ROM: %v", err_read)
 		return
 	}
 	defer delete(rom_data)
+	defer os.close(config.rom)
 
 	nes, err_init := nes_init(rom_data)
 	if err_init != nil {
@@ -124,55 +144,5 @@ tracking_allocator_report :: proc(track: mem.Tracking_Allocator) {
 		for entry in track.bad_free_array {
 			log.errorf("- %p @ %v\n", entry.memory, entry.location)
 		}
-	}
-}
-
-NES_Component :: enum { CPU, APU, PPU, CPU_BUS, IO }
-
-// TODO: configure this using compile-time flags? Or maybe simply at runtime?
-TRACE_COMPONENT :: bit_set[NES_Component]{ .CPU, .APU, .PPU, .CPU_BUS, .IO }
-
-@(disabled=!ODIN_DEBUG) // Disabled when not in debug
-trace :: proc(component: NES_Component, $format: string, args: ..any, loc := #caller_location) {
-	if !TRACING_ENABLED { // Tracing is also protected with runtime switch
-		return
-	}
-
-	@(disabled=.CPU not_in TRACE_COMPONENT)
-	trace_cpu :: proc($format: string, args: ..any, loc := #caller_location) {
-		log.debugf("CPU: " + format, ..args, location = loc)
-	}
-
-	@(disabled=.PPU not_in TRACE_COMPONENT)
-	trace_ppu :: proc($format: string, args: ..any, loc := #caller_location) {
-		log.debugf("PPU: " + format, ..args, location = loc)
-	}
-	
-	@(disabled=.APU not_in TRACE_COMPONENT)
-	trace_apu :: proc($format: string, args: ..any, loc := #caller_location) {
-		log.debugf("APU: " + format, ..args, location = loc)
-	}
-
-	@(disabled=.CPU_BUS not_in TRACE_COMPONENT)
-	trace_cpu_bus :: proc($format: string, args: ..any, loc := #caller_location) {
-		log.debugf("CPU BUS: " + format, ..args, location = loc)
-	}
-
-	@(disabled=.IO not_in TRACE_COMPONENT)
-	trace_io :: proc($format: string, args: ..any, loc := #caller_location) {
-		log.debugf("IO: " + format, ..args, location = loc)
-	}
-	
-	switch component {
-	case .CPU:
-		trace_cpu(format, ..args, loc = loc)
-	case .PPU:
-		trace_ppu(format, ..args, loc = loc)
-	case .APU: 
-		trace_apu(format, ..args, loc = loc)
-	case .CPU_BUS:
-		trace_cpu_bus(format, ..args, loc = loc)
-	case .IO:
-		trace_io(format, ..args, loc = loc)
 	}
 }

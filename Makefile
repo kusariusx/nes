@@ -10,10 +10,13 @@ run:
 	$(RUN_TARGET_COMMAND)
 
 build:
-	odin build . --o:speed --microarch:native --no-bounds-check --disable-assert --out:$(TARGET)
+	odin build . --o:speed --microarch:native --no-bounds-check --no-type-assert --disable-assert --out:$(TARGET)
 
 build-debug:
 	odin build . --debug --o:none --out:$(TARGET)
+
+build-debug-speed:
+	odin build . --debug --o:speed --out:$(TARGET)
 
 clean:
 	rm -rf nes nes.dSYM

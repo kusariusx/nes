@@ -22,6 +22,21 @@ CPU_Flags :: bit_field byte {
 	N:      byte | 1, // Negative
 }
 
+CPU_State :: struct {
+	// Registers
+	A:    byte, // Accumulator
+	X, Y: byte, // Indexing registers
+	S:    byte, // Stack pointer
+	P:    CPU_Flags,
+
+	// Program counter
+	// With this construction, both PC and its individual bytes can be referred just by their names - cpu.PC, cpu.PCL, cpu.PCH
+	using _: struct #raw_union {
+        using _: struct { PCL, PCH: byte },
+        PC: u16,
+    },
+}
+
 NMI_Vector   :: 0xFFFA
 Reset_Vector :: 0xFFFC
 IRQ_Vector   :: 0xFFFE
@@ -66,22 +81,12 @@ CPU :: struct {
 	// halt the CPU on the next cycle.
 	will_write: bool,
 
-	// Registers
-	A:                   byte, // Accumulator
-	X, Y:                byte, // Indexing registers
-	S:                   byte, // Stack pointer
-	P:                   CPU_Flags,
-
-	// Program counter
-	// With this construction, both PC and its individual bytes can be referred just by their names - cpu.PC, cpu.PCL, cpu.PCH
-	using _: struct #raw_union {
-        using _: struct { PCL, PCH: byte },
-        PC: u16,
-    },
+	using state: CPU_State,
 }
 
 Instruction :: struct {
 	mnemonic: string, // For disassembly/debug
+	format:   string, // For instructions with operands
 	handler:  proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8),
 }
 
@@ -297,6 +302,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 		} else {
 			// Decode instruction
 			cpu.instruction = &Instructions[opcode]
+			disassembler_start_instruction(opcode, cpu.instruction, cpu.state)
 
 			// Increment PC
 			cpu.PC += 1
@@ -410,6 +416,7 @@ cpu_tick :: proc {
 // Each instruction will individually command when its execution is done.
 // This is done to allow instructions to control for how many cycles they run.
 cpu_instruction_done :: proc(cpu: ^CPU) {
+	disassembler_end_instruction()
 	cpu.instruction = nil
 }
 

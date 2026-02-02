@@ -363,12 +363,15 @@ jmp_abs :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Jump Absolute
     case 2:
         // Fetch low address byte, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
 
         cpu_poll_interrupts(cpu, bus)
     case 3:
         // Copy low address byte to PCL, fetch high address byte to PCH, done
         cpu.PCH = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.PCH)
+
         cpu.PCL = cpu.instruction_operand
         cpu_instruction_done(cpu)
     }
@@ -380,10 +383,12 @@ jmp_ind :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
     case 2:
         // Fetch pointer address low, increment PC
         cpu.instruction_operands.bytes[LOW] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[LOW])
         cpu.PC += 1
     case 3:
         // Fetch pointer address high, increment PC
         cpu.instruction_operands.bytes[HIGH] = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operands.bytes[HIGH])
         cpu.PC += 1
     case 4:
         // Fetch low address to latch
@@ -406,6 +411,7 @@ jsr :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Jump to Subroutine
     case 2:
         // Fetch low address byte, increment PC
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(cpu.instruction_operand)
         cpu.PC += 1
     case 3:
         // Internal operation - dummy read the stack
@@ -424,7 +430,10 @@ jsr :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) { // Jump to Subroutine
         cpu_poll_interrupts(cpu, bus)
     case 6:
         // Copy low address byte to PCL, fetch high address byte to PCH, done
-        cpu.PCH = cpu_bus_read(bus, cpu.PC)
+        pch := cpu_bus_read(bus, cpu.PC)
+        disassembler_set_operand(pch)
+        
+        cpu.PCH = pch
         cpu.PCL = cpu.instruction_operand
 
         cpu_instruction_done(cpu)
