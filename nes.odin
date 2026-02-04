@@ -23,6 +23,10 @@ NES_Init_Error :: union #shared_nil {
     mem.Allocator_Error,
     Parsing_Error,
     Mapper_Initialization_Error,
+    enum {
+        PAL_Unsupported,
+        Dendy_Unsupported,
+    },
 }
 
 nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
@@ -38,6 +42,18 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
     io := new(IO) or_return
 
     rom := rom_parse(rom_data) or_return
+
+    // Refuse to load PAL and Dendy-only ROMs
+    if nes_20_data, ok := rom.header.format_specific_flags.(NES_20_Header_Data); ok {
+        switch nes_20_data.flags_12.timing_mode {
+        case 0: // NTSC
+        case 1: // PAL
+            return nil, .PAL_Unsupported
+        case 2: // Multi-region
+        case 3: // Dendy
+            return nil, .Dendy_Unsupported
+        }
+    }
 
     nes = new_clone(NES{
         rom = rom,

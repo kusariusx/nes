@@ -22,6 +22,45 @@ INES_Header_Data :: struct {
     // Bytes 11-15 are not used, but sometimes random data is put there
 }
 
+NES_20_Flag_13 :: struct #raw_union {
+    bit_field byte { // When Byte 7 AND 3 = 1
+        ppu_type: byte | 4,
+        hardware_type: byte | 4,
+    },
+    bit_field byte { // When Byte 7 AND 3 = 3
+        extended_console_type: byte | 4,
+    },
+}
+
+NES_20_Header_Data :: struct {
+    flags_8: bit_field byte {
+        mapper_bits_8_11: byte | 4,
+        submapper: byte | 4,
+    },
+    flags_9: bit_field byte {
+        prg_rom_banks_msb: byte | 4,
+        chr_rom_banks_msb: byte | 4,
+    },
+    flags_10: bit_field byte {
+        prg_ram_shift_count: byte | 4,
+        prg_nvram_shift_count: byte | 4,
+    },
+    flags_11: bit_field byte {
+        chr_ram_shift_count: byte | 4,
+        chr_nvram_shift_count: byte | 4,
+    },
+    flags_12: bit_field byte {
+        timing_mode: byte | 2,
+    },
+    flags_13: NES_20_Flag_13,
+    flags_14: bit_field byte {
+        miscellaneous_roms: byte | 2,
+    },
+    flags_15: bit_field byte {
+        default_expansion_device: byte | 6,
+    },
+}
+
 ROM_Header :: struct { // First 16-bytes of the ROM
     nes_constant: []byte, // Constant $4E $45 $53 $1A (ASCII "NES" followed by MS-DOS end-of-file)
     prg_rom_banks: byte,
@@ -41,6 +80,7 @@ ROM_Header :: struct { // First 16-bytes of the ROM
     },
     format_specific_flags: union {
         INES_Header_Data,
+        NES_20_Header_Data,
     },
 
     // Precalculated format-agnostic info
@@ -51,7 +91,7 @@ ROM :: struct {
     header: ROM_Header,
     trainer: [512]byte, // Could be absent, preallocate for simplicity
     prg_rom: []byte, // Program ROM
-    chr_rom: []byte, // Character? ROM - holds graphics tile data
+    chr_rom: []byte, // Character ROM - holds graphics tile data
     
     // TODO: ROM could also contain:
     // PlayChoice INST-ROM, if present (0 or 8192 bytes)
@@ -84,14 +124,23 @@ rom_parse :: proc(data: []byte) -> (rom: ^ROM, err: Parsing_Error) {
         flags_7 = auto_cast data[7],
     }
 
-    rom.header.format_specific_flags = INES_Header_Data{
-        flags_8 = data[8],
-        flags_9 = auto_cast data[9],
-        flags_10 = auto_cast data[10],
-    }
-
-    if rom.header.flags_7.nes_2_0 == 2 {
-        // Parse flags 8-15 using iNES 2.0 format
+    if rom.header.flags_7.nes_2_0 == 2 { // NES 2.0
+        rom.header.format_specific_flags = NES_20_Header_Data{
+            flags_8 = auto_cast data[8],
+            flags_9 = auto_cast data[9],
+            flags_10 = auto_cast data[10],
+            flags_11 = auto_cast data[11],
+            flags_12 = auto_cast data[12],
+            flags_13 = transmute(NES_20_Flag_13)data[13],
+            flags_14 = auto_cast data[14],
+            flags_15 = auto_cast data[15],
+        }
+    } else { // iNES
+        rom.header.format_specific_flags = INES_Header_Data{
+            flags_8 = data[8],
+            flags_9 = auto_cast data[9],
+            flags_10 = auto_cast data[10],
+        }
     }
 
     // Optional trainer
@@ -141,6 +190,12 @@ rom_prg_ram_size :: proc(rom: ^ROM) -> int {
 
         // When both flags_8 and flags_10.prg_ram_present are 0, we assume a single 8 KB bank of PRG-RAM
         return PRG_RAM_BANK_SIZE 
+    case NES_20_Header_Data:
+        if flags.flags_10.prg_ram_shift_count == 0 {
+            return 0
+        }
+
+        return 64 << uint(flags.flags_10.prg_ram_shift_count)
     }
 
     return 0

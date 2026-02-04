@@ -10,12 +10,18 @@ import sdl "vendor:sdl2"
 TARGET_FPS :: 60
 AUDIO_CUSHION_BYTES :: 4096
 
-Config :: struct {
-	rom: os.Handle `args:"pos=0,required,file=r" usage:"Path to ROM"`,
+when ODIN_DEBUG {
+	Config :: struct {
+		rom: os.Handle `args:"pos=0,required,file=r" usage:"Path to ROM"`,
 
-	// Hidden flags, used only in debug build mode
-	tracing_enabled: bool `args:"hidden" usage:"Enable generating tracelogs"`,
-	disassemble_into: os.Handle `args:"hidden,file=cw" usage:"Disassemble what CPU executes into a provided file"`,
+		// Debug-specific flags
+		tracing_enabled: bool `usage:"Enable generating tracelogs"`,
+		disassemble_into: os.Handle `args:"file=cw" usage:"Disassemble what CPU executes into a provided file"`,
+	}
+} else {
+	Config :: struct {
+		rom: os.Handle `args:"pos=0,required,file=r" usage:"Path to ROM"`,
+	}
 }
 
 main :: proc() {
@@ -36,14 +42,16 @@ main :: proc() {
 	config: Config
 	flags.parse_or_exit(&config, os.args)
 
-	TRACING_ENABLED = config.tracing_enabled
+	when ODIN_DEBUG {
+		TRACING_ENABLED = config.tracing_enabled
 
-	if config.disassemble_into != 0 {
-		stream := os.stream_from_handle(config.disassemble_into)
-		disassembler_set_output_stream(stream)
-	}
-	defer if config.disassemble_into != 0 {
-		os.close(config.disassemble_into)
+		if config.disassemble_into != 0 {
+			stream := os.stream_from_handle(config.disassemble_into)
+			disassembler_set_output_stream(stream)
+		}
+		defer if config.disassemble_into != 0 {
+			os.close(config.disassemble_into)
+		}
 	}
 
 	rom_data, err_read := os.read_entire_file_or_err(config.rom)
@@ -68,7 +76,8 @@ main :: proc() {
 	}
 	defer nes_free(nes)
 
-	log.infof("successfully loaded ROM with mapper %d", mapper_number(nes.rom))
+	_, is_nes_20 := nes.rom.header.format_specific_flags.(NES_20_Header_Data)
+	log.infof("successfully loaded %s ROM with mapper %d", is_nes_20 ? "NES 2.0" : "iNES", mapper_number(nes.rom))
 
 	nes_reset(nes)
 

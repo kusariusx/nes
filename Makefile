@@ -16,7 +16,7 @@ build-debug:
 	odin build . --debug --o:none --out:$(TARGET)
 
 build-debug-speed:
-	odin build . --debug --o:speed --out:$(TARGET)
+	odin build . --debug --o:speed --no-bounds-check --no-type-assert --disable-assert --out:$(TARGET)
 
 clean:
 	rm -rf nes nes.dSYM
