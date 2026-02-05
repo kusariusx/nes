@@ -1,5 +1,7 @@
 package main
 
+import "base:intrinsics"
+
 // IO bus decays to 0 after 3-30 milliseconds
 PPU_IO_BUS_DECAY_TIME :: 16129 // Approximately 3 milliseconds
 
@@ -281,39 +283,27 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
 
 // PPU runs 3x faster than CPU, so for each CPU tick, we tick PPU 3 times
 ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
-    // Handle IO bus value decay
-    if p.io_bus_decay_counter > 0 {
-        p.io_bus_decay_counter -= 1
-        if p.io_bus_decay_counter == 0 {
-            p.io_bus_value = 0
+    update_sprite_x_counters :: proc(p: ^PPU) {
+        for i in 0 ..< 8 {
+            if p.sprite_x_position[i] > 0 {
+                p.sprite_x_position[i] -= 1
+                p.sprite_x_position[i] -= u8(p.sprite_x_position[i] > 0)
+            }
         }
     }
 
-    // Handle delayed rendering toggle
-    if p.rendering_toggle_delay > 0 {
-        p.rendering_toggle_delay -= 1
-        if p.rendering_toggle_delay == 0 {
-            p.is_rendering_enabled = !p.is_rendering_enabled
-        }
-    }
+    ppu_handle_delayed_events(p)
 
     // Handle skipped cycle
     if p.will_skip_cycle {
         p.scanline_cycle += 1
     }
 
-    is_background_enabled := p.PPUMASK.b == 1
-    is_sprite_enabled := p.PPUMASK.s == 1
-
     is_pre_render_scanline := p.scanline == 261
     is_visible_scanline := !is_pre_render_scanline
 
     is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
     is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
-
-    is_odd_cycle := p.scanline_cycle % 2 == 1
-
-    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
    
     switch p.scanline {
     case 0 ..= 239, 261: // Visible scanlines and pre-render scanline
@@ -341,324 +331,42 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 p.oam_corruption_seed = 0
             }
 
-            // Sprite evaluation
-            // Only happens on visible scanlines when rendering is enabled
+            // Sprite evaluation happens on visible scanlines when rendering is enabled
             if is_visible_scanline {
-                to_next_sprite :: proc(p: ^PPU) {
-                    p.OAMADDR += 4
-                    if p.OAMADDR >> 2 == 0 {
-                        p.sprite_eval_done = true
-                    }
-
-                    p.sprite_eval_sprite_byte = 0
-                }
-
-                to_next_byte :: proc(p: ^PPU) {
-                    p.OAMADDR += 1
-
-                    if p.sprite_eval_sprite_byte == 3 {
-                        if p.OAMADDR >> 2 == 0 {
-                            p.sprite_eval_done = true
-                        }
-
-                        p.sprite_eval_sprite_byte = 0
-                    } else {
-                        p.sprite_eval_sprite_byte += 1
-                    }
-                }
-
-                switch p.scanline_cycle {
-                case 1: // Sprite evaluation has just started, reset state
-                    p.sprite_eval_sprite_byte = 0
-                    p.sprite_eval_found = 0
-                    p.sprite_eval_pending_reads = 0
-                    p.sprite_eval_done = false
-                    p.sprite_eval_sprite_0_present = false
-
-                    // We still have some stuff to do on cycle 1
-                    fallthrough
-                case 1 ..= 64: // Secondary OAM clearing
-                    if is_odd_cycle {
-                        // Dummy read from OAM
-                        // Note: since OAM is not accessed through the bus (i.e. read has no side effects), 
-                        // we can probably just do nothing here?
-                    } else {
-                        // Write 0xFF to secondary OAM
-                        p.secondary_oam[p.sprite_eval_secondary_oam_pos] = 0xFF
-                        p.sprite_eval_secondary_oam_pos = (p.sprite_eval_secondary_oam_pos + 1) & 0x1F
-                    }
-                case 65 ..= 256: // Sprite evaluation
-                    if p.sprite_eval_done {
-                        if is_odd_cycle {
-                            // Dummy read n-th sprite from OAM
-                            // Reading OAM has no side effects, so can just do nothing here
-                        } else {
-                            to_next_sprite(p)
-                        }
-
-                        // Just burn cycles until we reach cycle 257
-
-                        break
-                    }
-
-                    // On odd cycles, data is read from OAM
-                    if is_odd_cycle {
-                        p.sprite_eval_oam_data = p.oam[p.OAMADDR]
-
-                        break
-                    }
-                    
-                    // Secondary OAM is full - overflow phase
-                    if p.sprite_eval_secondary_oam_pos == 32 {
-                        if p.sprite_eval_pending_reads > 0 {
-                            // Dummy read the OAM
-
-                            to_next_byte(p)
-                            p.sprite_eval_pending_reads -= 1
-                        } else {
-                            // Evaluate data as a Y position. Due to hardware bug leading to m being incremented together with n,
-                            // data will not always be the 0-th byte of a sprite, but we still evaluate it as such.
-                            sprite_y := int(p.sprite_eval_oam_data)
-                            sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
-
-                            if sprite_in_range {
-                                // Set overflow flag because we have found more than 8 in-range sprites
-                                p.PPUSTATUS.O = 1
-
-                                to_next_byte(p)
-
-                                // Request to read 3 next OAM bytes without evaluating them, effectively skipping to the next sprite
-                                p.sprite_eval_pending_reads = 3
-                            } else {
-                                // Hardware bug - increment both n and m independently (no carry between them).
-                                // This leads to random data (tile index, attributes, X position) being evaluated
-                                // as Y position, leading to random changes in overflow flag.
-                                new_n := ((p.OAMADDR >> 2) + 1) & 0x3F
-                                new_m := ((p.OAMADDR & 0x03) + 1) & 0x03
-                                p.OAMADDR = u8((new_n << 2) | new_m)
-                                
-                                p.sprite_eval_sprite_byte = (p.sprite_eval_sprite_byte + 1) & 0x03
-                                
-                                if new_n == 0 {
-                                    p.sprite_eval_done = true
-                                }
-                            }
-                        }
-
-                        break
-                    }
-
-                    // Secondary OAM is not full - update state and write to secondary OAM
-                    switch p.sprite_eval_sprite_byte {
-                    case 0: // Started processing a new sprite (0-th byte, Y position)
-                        // We write Y to secondary OAM regardless of whether the sprite is in range or not.
-                        // If not in range, it will be just overwritten by the next sprite.
-                        p.secondary_oam[p.sprite_eval_secondary_oam_pos] = p.sprite_eval_oam_data
-
-                        sprite_y := int(p.sprite_eval_oam_data)
-                        sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
-                        
-                        if sprite_in_range {
-                            p.sprite_eval_found += 1
-                            p.sprite_eval_secondary_oam_pos += 1
-
-                            if p.scanline_cycle == 66 {
-                                p.sprite_eval_sprite_0_present = true
-                            }
-
-                            to_next_byte(p)
-                        } else {
-                            to_next_sprite(p)
-                        }
-                    case 1, 2, 3: // Processing tile index, attributes, or X position
-                        // Copy byte to secondary OAM
-                        p.secondary_oam[p.sprite_eval_secondary_oam_pos] = p.sprite_eval_oam_data
-                        p.sprite_eval_secondary_oam_pos += 1
-
-                        to_next_byte(p)
-                    }
-                }
+                ppu_sprite_evaluation(p)
             }
 
-            // Sprite fetching, happens on both visible scanlines and pre-render scanline
-            switch p.scanline_cycle {
-            case 257 ..= 320:
-                sprite_idx := p.sprite_eval_secondary_oam_pos >> 2
-                
-                // When we have less than 8 sprites on a scanline, we still perform all this fetches but discard
-                // those dummy sprites during rendering.
-                switch p.scanline_cycle % 8 {
-                case 1: // Read Y
-                    p.sprite_y_position = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
-                    p.sprite_eval_secondary_oam_pos += 1
-                    ppu_fetch_background_nametable_byte(p, b) // Dummy nametable fetch (at cycles 1-2)
-                case 2: // Read tile number
-                    p.sprite_tile_number = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
-                    p.sprite_eval_secondary_oam_pos += 1
-                case 3: // Read attributes
-                    p.sprite_attributes[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
-                    p.sprite_eval_secondary_oam_pos += 1
-                    ppu_fetch_background_nametable_byte(p, b) // Dummy nametable fetch (at cycles 3-4)
-                case 4: // Read X
-                    p.sprite_x_position[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+            // Sprite fetching happens on both visible scanlines and pre-render scanline
+            ppu_sprite_fetching(p, b)
 
-                    // Not incrementing secondary OAM position because that would incorrectly increment sprite_idx
-                case 5: // Fetch pattern low (takes 2 cycles)
-                    p.sprite_shifter_pattern_low[sprite_idx] = ppu_fetch_sprite_pattern_byte(p, b, sprite_idx, LOW)
-                case 7: // Fetch pattern high (takes 2 cycles)
-                    p.sprite_shifter_pattern_high[sprite_idx] = ppu_fetch_sprite_pattern_byte(p, b, sprite_idx, HIGH)
-
-                    // After we are done with the current sprite, we can make a final increment
-                    p.sprite_eval_secondary_oam_pos += 1
-
-                    // Even for left-over sprites (those that cointain $FF data), we still have to do all memory fetches.
-                    // The data is then discarded.
-                    discard_sprite := sprite_idx >= p.sprite_eval_found
-
-                    // Edge case - under some conditions it is possible to draw sprites on scanline 0, namely when sprites
-                    // are fetched during pre-render scanline and are in-range for scanline 261 & 0xFF = 5.
-                    // So, check whether sprite is in range, and replace its pattern with transparent data in case it isn't.
-                    if is_pre_render_scanline {
-                        sprite_y := int(p.sprite_y_position)
-                        sprite_in_range := 5 >= sprite_y && 5 < sprite_y + sprite_height
-
-                        if !sprite_in_range { // Clear stale pattern data - sprite should not be drawn
-                            discard_sprite = true
-                        }
-                    }
-
-                    if discard_sprite { 
-                        p.sprite_shifter_pattern_low[sprite_idx] = 0
-                        p.sprite_shifter_pattern_high[sprite_idx] = 0
-
-                        if sprite_idx == 0 { // In case we accidentally triggered a sprite 0 hit
-                            p.sprite_0_on_current_scanline = false
-                        }
-                    }
-                }
-
-                // OAM address is reset on every cycle of sprite fetching
-                p.OAMADDR = 0
-            }
-
-            // Background and sprite rendering
             if is_visible_scanline && is_rendering_cycle {
-                pixel_x := p.scanline_cycle - 1
-
-                color, palette: u16
-                background_color, background_palette: u16
-                sprite_color, sprite_palette, sprite_priority: u8
-
-                // Handle disable flag and "show leftmost 8 pixels" flag, extract pixels
-                if !is_background_enabled || (pixel_x < 8 && p.PPUMASK.m == 0) {
-                    background_color, background_palette = 0, 0
-                } else {
-                    background_color, background_palette = ppu_get_background_pixel(p)
-                }
-
-                if !is_sprite_enabled || (pixel_x < 8 && p.PPUMASK.M == 0) {
-                    sprite_color, sprite_palette, sprite_priority = 0, 0, 0
-                } else {
-                    sprite_color, sprite_palette, sprite_priority = ppu_get_sprite_pixel(p)
-                }
-
-                // Sprite 0 hit detection
-                if p.sprite_0_on_current_scanline {
-                    // If sprite 0 is present on the current scanline, it is guaranteed to be first in our shifters/latches
-                    sprite_0_bit_0 := p.sprite_shifter_pattern_low[0] >> 7
-                    sprite_0_bit_1 := p.sprite_shifter_pattern_high[0] >> 7
-                    sprite_0_color := (sprite_0_bit_1 << 1) | sprite_0_bit_0
-
-                    sprite_0_hit := // Sprite 0 is hit when...
-                        p.sprite_x_position[0] == 0 && // Sprite 0 is active
-                        p.PPUSTATUS.S == 0 && // It was not hit earlier on the scanline
-                        is_sprite_enabled && // Sprite rendering is enabled - we need to check this because we read sprite data directly from shifters
-                        background_color != 0 && sprite_0_color != 0 && // Both background and sprite 0 are opaque
-                        // Sprite 0 hit is not detected when rendering is disabled for leftmost 8 pixels.
-                        // We are either in the safe zone where this restriction does not apply (pixel_x >= 8),
-                        // Or both background and sprites are enabled in this zone.
-                        (pixel_x >= 8 || (p.PPUMASK.m == 1 && p.PPUMASK.M == 1)) &&
-                        pixel_x != 255 // Due to hardware specifics, sprite 0 hit cannot occur at X = 255
-
-                    if sprite_0_hit {
-                        p.PPUSTATUS.S = 1
-                    }
-                }
-
-                // After pixel extraction and sprite 0 hit detection, shift active sprites
-                for i in 0 ..< 8 {
-                    if p.sprite_x_position[i] == 0 {
-                        p.sprite_shifter_pattern_low[i] <<= 1
-                        p.sprite_shifter_pattern_high[i] <<= 1
-                    }
-                }
-
-                // Determine what pixel to draw
-                if (sprite_color != 0 && sprite_priority == 0) || background_color == 0 { // Sprite pixel wins
-                    color, palette = u16(sprite_color), u16(sprite_palette)
-                } else { // Background pixel wins
-                    color, palette = background_color, background_palette
-                }
-
-                // Calculate palette RAM address
-                // If color is 0, it's transparent - use backdrop color
-                palette_entry: u16
-                if color == 0 {
-                    palette_entry = 0 // Backdrop color
-                } else {
-                    palette_entry = (palette << 2) + color
-                }
-
-                color_index := ppu_bus_read_palette_ram(b, palette_entry)
-                
-                // Write to framebuffer
-                pixel_index := p.scanline * 256 + pixel_x
-                p.framebuffer[pixel_index] = color_index
+                ppu_rendering(p, b)
             }
 
-            // Background fetching, happens on both visible scanlines and pre-render scanline
+            // Background fetching happens on both visible scanlines and pre-render scanline
             if is_rendering_cycle || is_prefetch_cycle {
-                switch p.scanline_cycle % 8 {
-                case 1:
-                    ppu_load_background_shifters(p)
-                    p.bg_next_tile_id = ppu_fetch_background_nametable_byte(p, b)
-                case 3:
-                    p.bg_next_tile_palette = ppu_fetch_background_attribute_byte(p, b)
-                case 5:
-                    p.bg_next_tile_pattern_low = ppu_fetch_background_pattern_byte(p, b, p.bg_next_tile_id, LOW)
-                case 7:
-                    p.bg_next_tile_pattern_high = ppu_fetch_background_pattern_byte(p, b, p.bg_next_tile_id, HIGH)
-                case 0:
-                    ppu_increment_coarse_x(p)
-                }
-
-                ppu_shift_background_registers(p)
+                ppu_background_fetching(p, b)
             }
             
-            if p.scanline_cycle == 256 {
+            switch p.scanline_cycle {
+            case 256:
                 ppu_increment_y(p)
-            }
-            
-            if p.scanline_cycle == 257 {
+            case 257:
                 ppu_transfer_x(p)
 
                 // After sprite evaluation and rendering, remember sprite 0 presense to be able 
                 // to detect sprite 0 hit on the next scanline.
                 p.sprite_0_on_current_scanline = p.sprite_eval_sprite_0_present
-            }
-            
-            if is_pre_render_scanline && p.scanline_cycle >= 280 && p.scanline_cycle <= 304 {
-                ppu_transfer_y(p)
+            case 280 ..= 304:
+                if is_pre_render_scanline {
+                    ppu_transfer_y(p)
+                }
             }
         }
 
         // Decrement sprite X counters - this happens even when rendering is disabled
         if is_visible_scanline && is_rendering_cycle {
-            for i in 0 ..< 8 {
-                if p.sprite_x_position[i] > 0 {
-                    p.sprite_x_position[i] -= 1
-                }
-            }
+            update_sprite_x_counters(p)
         }
     case 240: // Post-render scanline
         // PPU is idle during this scanline
@@ -697,6 +405,329 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     b.cpu.just_polled_interrupts = false
 }
 
+ppu_handle_delayed_events :: proc(p: ^PPU) {
+    // Handle IO bus value decay
+    if p.io_bus_decay_counter > 0 {
+        p.io_bus_decay_counter -= 1
+        if p.io_bus_decay_counter == 0 {
+            p.io_bus_value = 0
+        }
+    }
+
+    // Handle delayed rendering toggle
+    if p.rendering_toggle_delay > 0 {
+        p.rendering_toggle_delay -= 1
+        if p.rendering_toggle_delay == 0 {
+            p.is_rendering_enabled = !p.is_rendering_enabled
+        }
+    }
+}
+
+ppu_background_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
+    switch p.scanline_cycle % 8 {
+    case 1:
+        ppu_load_background_shifters(p)
+        p.bg_next_tile_id = ppu_fetch_background_nametable_byte(p, b)
+    case 3:
+        p.bg_next_tile_palette = ppu_fetch_background_attribute_byte(p, b)
+    case 5:
+        p.bg_next_tile_pattern_low = ppu_fetch_background_pattern_byte(p, b, p.bg_next_tile_id, LOW)
+    case 7:
+        p.bg_next_tile_pattern_high = ppu_fetch_background_pattern_byte(p, b, p.bg_next_tile_id, HIGH)
+    case 0:
+        ppu_increment_coarse_x(p)
+    }
+
+    ppu_shift_background_registers(p)
+}
+
+ppu_rendering :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
+    shift_active_sprites :: proc(p: ^PPU) {
+        for i in 0 ..< 8 {
+            if p.sprite_x_position[i] == 0 {
+                p.sprite_shifter_pattern_low[i] <<= 1
+                p.sprite_shifter_pattern_high[i] <<= 1
+            }
+        }
+    }
+
+    is_background_enabled := p.PPUMASK.b == 1
+    is_sprite_enabled := p.PPUMASK.s == 1
+
+    pixel_x := p.scanline_cycle - 1
+
+    color, palette: u16
+    background_color, background_palette: u16
+    sprite_color, sprite_palette, sprite_priority: u8
+
+    // Handle disable flag and "show leftmost 8 pixels" flag, extract pixels
+    if !is_background_enabled || (pixel_x < 8 && p.PPUMASK.m == 0) {
+        background_color, background_palette = 0, 0
+    } else {
+        background_color, background_palette = ppu_get_background_pixel(p)
+    }
+
+    if !is_sprite_enabled || (pixel_x < 8 && p.PPUMASK.M == 0) {
+        sprite_color, sprite_palette, sprite_priority = 0, 0, 0
+    } else {
+        sprite_color, sprite_palette, sprite_priority = ppu_get_sprite_pixel(p)
+    }
+
+    // Sprite 0 hit detection
+    if p.sprite_0_on_current_scanline {
+        // If sprite 0 is present on the current scanline, it is guaranteed to be first in our shifters/latches
+        sprite_0_bit_0 := p.sprite_shifter_pattern_low[0] >> 7
+        sprite_0_bit_1 := p.sprite_shifter_pattern_high[0] >> 7
+        sprite_0_color := (sprite_0_bit_1 << 1) | sprite_0_bit_0
+
+        sprite_0_hit := // Sprite 0 is hit when...
+            p.sprite_x_position[0] == 0 && // Sprite 0 is active
+            p.PPUSTATUS.S == 0 && // It was not hit earlier on the scanline
+            is_sprite_enabled && // Sprite rendering is enabled - we need to check this because we read sprite data directly from shifters
+            background_color != 0 && sprite_0_color != 0 && // Both background and sprite 0 are opaque
+            // Sprite 0 hit is not detected when rendering is disabled for leftmost 8 pixels.
+            // We are either in the safe zone where this restriction does not apply (pixel_x >= 8),
+            // Or both background and sprites are enabled in this zone.
+            (pixel_x >= 8 || (p.PPUMASK.m == 1 && p.PPUMASK.M == 1)) &&
+            pixel_x != 255 // Due to hardware specifics, sprite 0 hit cannot occur at X = 255
+
+        if sprite_0_hit {
+            p.PPUSTATUS.S = 1
+        }
+    }
+
+    // After pixel extraction and sprite 0 hit detection, shift active sprites
+    shift_active_sprites(p)
+
+    // Determine what pixel to draw
+    if (sprite_color != 0 && sprite_priority == 0) || background_color == 0 { // Sprite pixel wins
+        color, palette = u16(sprite_color), u16(sprite_palette)
+    } else { // Background pixel wins
+        color, palette = background_color, background_palette
+    }
+
+    // Calculate palette RAM address
+    // If color is 0, it's transparent - use backdrop color
+    palette_entry: u16
+    if color == 0 {
+        palette_entry = 0 // Backdrop color
+    } else {
+        palette_entry = (palette << 2) + color
+    }
+
+    color_index := ppu_bus_read_palette_ram(b, palette_entry)
+    
+    // Write to framebuffer
+    pixel_index := p.scanline * 256 + pixel_x
+    p.framebuffer[pixel_index] = color_index
+}
+
+ppu_sprite_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
+    if p.scanline_cycle < 257 || p.scanline_cycle > 320 {
+        return
+    }
+
+    is_pre_render_scanline := p.scanline == 261
+    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
+
+    sprite_idx := p.sprite_eval_secondary_oam_pos >> 2
+    
+    // When we have less than 8 sprites on a scanline, we still perform all this fetches but discard
+    // those dummy sprites during rendering.
+    switch p.scanline_cycle % 8 {
+    case 1: // Read Y
+        p.sprite_y_position = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+        p.sprite_eval_secondary_oam_pos += 1
+        ppu_fetch_background_nametable_byte(p, b) // Dummy nametable fetch (at cycles 1-2)
+    case 2: // Read tile number
+        p.sprite_tile_number = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+        p.sprite_eval_secondary_oam_pos += 1
+    case 3: // Read attributes
+        p.sprite_attributes[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+        p.sprite_eval_secondary_oam_pos += 1
+        ppu_fetch_background_nametable_byte(p, b) // Dummy nametable fetch (at cycles 3-4)
+    case 4: // Read X
+        p.sprite_x_position[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+
+        // Not incrementing secondary OAM position because that would incorrectly increment sprite_idx
+    case 5: // Fetch pattern low (takes 2 cycles)
+        p.sprite_shifter_pattern_low[sprite_idx] = ppu_fetch_sprite_pattern_byte(p, b, sprite_idx, LOW)
+    case 7: // Fetch pattern high (takes 2 cycles)
+        p.sprite_shifter_pattern_high[sprite_idx] = ppu_fetch_sprite_pattern_byte(p, b, sprite_idx, HIGH)
+
+        // After we are done with the current sprite, we can make a final increment
+        p.sprite_eval_secondary_oam_pos += 1
+
+        // Even for left-over sprites (those that cointain $FF data), we still have to do all memory fetches.
+        // The data is then discarded.
+        discard_sprite := sprite_idx >= p.sprite_eval_found
+
+        // Edge case - under some conditions it is possible to draw sprites on scanline 0, namely when sprites
+        // are fetched during pre-render scanline and are in-range for scanline 261 & 0xFF = 5.
+        // So, check whether sprite is in range, and replace its pattern with transparent data in case it isn't.
+        if is_pre_render_scanline {
+            sprite_y := int(p.sprite_y_position)
+            sprite_in_range := 5 >= sprite_y && 5 < sprite_y + sprite_height
+
+            if !sprite_in_range { // Clear stale pattern data - sprite should not be drawn
+                discard_sprite = true
+            }
+        }
+
+        if discard_sprite { 
+            p.sprite_shifter_pattern_low[sprite_idx] = 0
+            p.sprite_shifter_pattern_high[sprite_idx] = 0
+
+            if sprite_idx == 0 { // In case we accidentally triggered a sprite 0 hit
+                p.sprite_0_on_current_scanline = false
+            }
+        }
+    }
+
+    // OAM address is reset on every cycle of sprite fetching
+    p.OAMADDR = 0
+}
+
+ppu_sprite_evaluation :: proc(p: ^PPU) {
+    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
+    is_odd_cycle := p.scanline_cycle % 2 == 1
+
+    to_next_sprite :: proc(p: ^PPU) {
+        p.OAMADDR += 4
+        if p.OAMADDR >> 2 == 0 {
+            p.sprite_eval_done = true
+        }
+
+        p.sprite_eval_sprite_byte = 0
+    }
+
+    to_next_byte :: proc(p: ^PPU) {
+        p.OAMADDR += 1
+
+        if p.sprite_eval_sprite_byte == 3 {
+            if p.OAMADDR >> 2 == 0 {
+                p.sprite_eval_done = true
+            }
+
+            p.sprite_eval_sprite_byte = 0
+        } else {
+            p.sprite_eval_sprite_byte += 1
+        }
+    }
+
+    switch p.scanline_cycle {
+    case 1: // Sprite evaluation has just started, reset state
+        p.sprite_eval_sprite_byte = 0
+        p.sprite_eval_found = 0
+        p.sprite_eval_pending_reads = 0
+        p.sprite_eval_done = false
+        p.sprite_eval_sprite_0_present = false
+
+        // We still have some stuff to do on cycle 1
+        fallthrough
+    case 1 ..= 64: // Secondary OAM clearing
+        if is_odd_cycle {
+            // Dummy read from OAM
+            // Note: since OAM is not accessed through the bus (i.e. read has no side effects), 
+            // we can probably just do nothing here?
+        } else {
+            // Write 0xFF to secondary OAM
+            p.secondary_oam[p.sprite_eval_secondary_oam_pos] = 0xFF
+            p.sprite_eval_secondary_oam_pos = (p.sprite_eval_secondary_oam_pos + 1) & 0x1F
+        }
+    case 65 ..= 256: // Sprite evaluation
+        if p.sprite_eval_done {
+            if is_odd_cycle {
+                // Dummy read n-th sprite from OAM
+                // Reading OAM has no side effects, so can just do nothing here
+            } else {
+                to_next_sprite(p)
+            }
+
+            // Just burn cycles until we reach cycle 257
+
+            break
+        }
+
+        // On odd cycles, data is read from OAM
+        if is_odd_cycle {
+            p.sprite_eval_oam_data = p.oam[p.OAMADDR]
+
+            break
+        }
+        
+        // Secondary OAM is full - overflow phase
+        if p.sprite_eval_secondary_oam_pos == 32 {
+            if p.sprite_eval_pending_reads > 0 {
+                // Dummy read the OAM
+
+                to_next_byte(p)
+                p.sprite_eval_pending_reads -= 1
+            } else {
+                // Evaluate data as a Y position. Due to hardware bug leading to m being incremented together with n,
+                // data will not always be the 0-th byte of a sprite, but we still evaluate it as such.
+                sprite_y := int(p.sprite_eval_oam_data)
+                sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
+
+                if sprite_in_range {
+                    // Set overflow flag because we have found more than 8 in-range sprites
+                    p.PPUSTATUS.O = 1
+
+                    to_next_byte(p)
+
+                    // Request to read 3 next OAM bytes without evaluating them, effectively skipping to the next sprite
+                    p.sprite_eval_pending_reads = 3
+                } else {
+                    // Hardware bug - increment both n and m independently (no carry between them).
+                    // This leads to random data (tile index, attributes, X position) being evaluated
+                    // as Y position, leading to random changes in overflow flag.
+                    new_n := ((p.OAMADDR >> 2) + 1) & 0x3F
+                    new_m := ((p.OAMADDR & 0x03) + 1) & 0x03
+                    p.OAMADDR = u8((new_n << 2) | new_m)
+                    
+                    p.sprite_eval_sprite_byte = (p.sprite_eval_sprite_byte + 1) & 0x03
+                    
+                    if new_n == 0 {
+                        p.sprite_eval_done = true
+                    }
+                }
+            }
+
+            break
+        }
+
+        // Secondary OAM is not full - update state and write to secondary OAM
+        switch p.sprite_eval_sprite_byte {
+        case 0: // Started processing a new sprite (0-th byte, Y position)
+            // We write Y to secondary OAM regardless of whether the sprite is in range or not.
+            // If not in range, it will be just overwritten by the next sprite.
+            p.secondary_oam[p.sprite_eval_secondary_oam_pos] = p.sprite_eval_oam_data
+
+            sprite_y := int(p.sprite_eval_oam_data)
+            sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
+            
+            if sprite_in_range {
+                p.sprite_eval_found += 1
+                p.sprite_eval_secondary_oam_pos += 1
+
+                if p.scanline_cycle == 66 {
+                    p.sprite_eval_sprite_0_present = true
+                }
+
+                to_next_byte(p)
+            } else {
+                to_next_sprite(p)
+            }
+        case 1, 2, 3: // Processing tile index, attributes, or X position
+            // Copy byte to secondary OAM
+            p.secondary_oam[p.sprite_eval_secondary_oam_pos] = p.sprite_eval_oam_data
+            p.sprite_eval_secondary_oam_pos += 1
+
+            to_next_byte(p)
+        }
+    }
+}
+
 // Finds sprite pixel that needs to be drawn.
 // This function does not account for priority attribute bit - sprite pixel still has to be
 // evaluated against background to determine which one to draw.
@@ -720,18 +751,6 @@ ppu_get_sprite_pixel :: proc(p: ^PPU) -> (color: u8, palette: u8, priority: u8) 
     }
     
     return 0, 0, 0 // No opaque sprite found
-}
-
-reverse_bits :: proc(n: u8) -> u8 {
-    n := n
-    result := u8(0)
-
-    for _ in 0 ..< 8 {
-        result = (result << 1) | (n & 1)
-        n >>= 1
-    }
-
-    return result
 }
 
 ppu_fetch_sprite_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, sprite_idx: u8, plane: u16) -> u8 {
@@ -774,7 +793,7 @@ ppu_fetch_sprite_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, sprite_idx: u8, 
     pattern := ppu_bus_read(b, address)
 
     if attributes & 0x40 != 0 { // Horizontal flip
-        pattern = reverse_bits(pattern)
+        pattern = intrinsics.reverse_bits(pattern)
     }
     
     return pattern
