@@ -25,18 +25,19 @@ when ODIN_DEBUG {
 }
 
 main :: proc() {
+	// Set up logger
+	logger := log.create_console_logger(opt = {})
+	context.logger = logger
+	defer log.destroy_console_logger(logger)
+
 	when ODIN_DEBUG {
-		// Set up tracking allocator
+		log.infof("setting up tracking allocator")
+
 		track: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&track, context.allocator)
 		context.allocator = mem.tracking_allocator(&track)
 		defer tracking_allocator_report(track)
 	}
-
-	// Set up logger
-	logger := log.create_console_logger(opt = {})
-	context.logger = logger
-	defer log.destroy_console_logger(logger)
 
 	// Parse config
 	config: Config
@@ -141,17 +142,27 @@ main :: proc() {
 }
 
 tracking_allocator_report :: proc(track: mem.Tracking_Allocator) {
+	issues_found := false
+
 	if len(track.allocation_map) > 0 {
-		log.errorf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+		issues_found = true
+
+		log.errorf("=== %v allocations not freed: ===", len(track.allocation_map))
 		for _, entry in track.allocation_map {
-			log.errorf("- %v bytes leaked @ %v\n", entry.size, entry.location)
+			log.errorf("- %v bytes leaked @ %v", entry.size, entry.location)
 		}
 	}
 
 	if len(track.bad_free_array) > 0 {
-		log.errorf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+		issues_found = true
+
+		log.errorf("=== %v incorrect frees: ===", len(track.bad_free_array))
 		for entry in track.bad_free_array {
-			log.errorf("- %p @ %v\n", entry.memory, entry.location)
+			log.errorf("- %p @ %v", entry.memory, entry.location)
 		}
+	}
+
+	if !issues_found {
+		log.infof("no memory allocation issues found")
 	}
 }

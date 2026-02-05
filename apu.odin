@@ -679,3 +679,10 @@ apu_mix_output :: proc(a: ^APU) {
     triangle_noise_dmc_output := APU_Mixer_Triangle_Noise_DMC_Lookup[3 * a.triangle_output + 2 * a.noise_output + a.dmc_output]
     a.mixer_output = pulse_output + triangle_noise_dmc_output
 }
+
+apu_reset :: proc(a: ^APU) {
+    a.dmc_bits_remaining = 8
+    a.dmc_sample_buffer_is_empty = true
+    a.dmc_is_silence = true
+    a.noise_lfsr = 1
+}

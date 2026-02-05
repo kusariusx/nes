@@ -30,65 +30,54 @@ NES_Init_Error :: union #shared_nil {
 }
 
 nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
-    // TODO: refactor this procedure, it looks messy and hard to follow
+    validate_rom :: proc(rom: ^ROM) -> NES_Init_Error {
+        // Refuse to load PAL and Dendy-only ROMs
+        if nes_20_data, ok := rom.header.format_specific_flags.(NES_20_Header_Data); ok {
+            switch nes_20_data.flags_12.timing_mode {
+            case 0: // NTSC
+            case 1: // PAL
+                return .PAL_Unsupported
+            case 2: // Multi-region
+            case 3: // Dendy
+                return .Dendy_Unsupported
+            }
+        }
 
+        return nil
+    }
+
+    rom := rom_parse(rom_data) or_return
+    validate_rom(rom) or_return
+
+    // Allocate components
     ppu := new(PPU) or_return
 	apu := new(APU) or_return
     cpu := new(CPU) or_return
-	
 	ppu_bus := new(NES_PPU_Bus) or_return
     cpu_bus := new(NES_CPU_Bus) or_return
-
     io := new(IO) or_return
 
-    rom := rom_parse(rom_data) or_return
+    // Allocate NES instance holding all components together
+    nes = new_clone(NES{rom = rom, ppu = ppu, apu = apu, cpu = cpu, ppu_bus = ppu_bus, cpu_bus = cpu_bus, io = io}) or_return
+    nes.mapper = mapper_init(nes) or_return
 
-    // Refuse to load PAL and Dendy-only ROMs
-    if nes_20_data, ok := rom.header.format_specific_flags.(NES_20_Header_Data); ok {
-        switch nes_20_data.flags_12.timing_mode {
-        case 0: // NTSC
-        case 1: // PAL
-            return nil, .PAL_Unsupported
-        case 2: // Multi-region
-        case 3: // Dendy
-            return nil, .Dendy_Unsupported
-        }
-    }
-
-    nes = new_clone(NES{
-        rom = rom,
-        ppu = ppu,
-        apu = apu,
+    // Initialize links between components
+    ppu_bus^ = {
         cpu = cpu,
-        ppu_bus = ppu_bus,
         cpu_bus = cpu_bus,
-        io = io,
-    }) or_return
-
-    mapper, err_mapper := mapper_init(nes)
-    if err_mapper != nil {
-        rom_free(rom)
-        return nil, err_mapper
+        rom = rom,
+        mapper = nes.mapper,
     }
 
-    apu.dmc_bits_remaining = 8
-    apu.dmc_sample_buffer_is_empty = true
-    apu.dmc_is_silence = true
-    apu.noise_lfsr = 1
+    cpu_bus^ = {
+        ppu = ppu,
+        ppu_bus = ppu_bus,
+        apu = apu,
+        rom = rom,
+        mapper = nes.mapper,
+        io = io,
+    }
 
-    ppu_bus.cpu = cpu
-	ppu_bus.cpu_bus = cpu_bus
-    ppu_bus.rom = rom
-    ppu_bus.mapper = mapper
-    
-	cpu_bus.ppu = ppu
-    cpu_bus.ppu_bus = ppu_bus
-    cpu_bus.apu = apu
-    cpu_bus.rom = rom
-    cpu_bus.mapper = mapper
-    cpu_bus.io = io
-
-    nes.mapper = mapper
     return nes, nil
 }
 
@@ -120,6 +109,7 @@ nes_attach_peripheral :: proc(nes: ^NES, p: Peripheral, port: IO_Port) {
 // Resets the state of the hardware but leaves ROM and mapper in place
 nes_reset :: proc(nes: ^NES) {
     cpu_reset(nes.cpu, nes.cpu_bus)
+    apu_reset(nes.apu)
 
     nes.breakpoint = false
 }
