@@ -1,6 +1,9 @@
 package main
 
+import "core:simd"
 import "base:intrinsics"
+
+PPU_USE_OPTIMIZED_PROCS :: false
 
 // IO bus decays to 0 after 3-30 milliseconds
 PPU_IO_BUS_DECAY_TIME :: 16129 // Approximately 3 milliseconds
@@ -80,8 +83,8 @@ PPU :: struct {
     bg_next_tile_pattern_high: u8, // High bits of 2-bit color codes
 
     is_odd_frame: bool,
-    scanline_cycle: int, // Current cycle/dot inside a scanline
-    scanline: int,       // Current scanline
+    scanline_cycle: u16, // Current cycle/dot inside a scanline
+    scanline: u16,       // Current scanline
     
     sprite_eval_sprite_byte: u8,
     sprite_eval_oam_data: u8,
@@ -124,6 +127,8 @@ PPU :: struct {
 }
 
 ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
+    is_visible_or_pre_render_scanline := p.scanline == 261 || (p.scanline >= 0 && p.scanline <= 239)
+
     switch reg {
     case 2: // PPUSTATUS
         value := p.PPUSTATUS
@@ -187,8 +192,14 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
             p.ppudata_read_buffer = value
         }
 
-        // Auto-increment v based on PPUCTRL.I
-        p.v += p.PPUCTRL.I == 0 ? 1 : 32
+        // Increment v
+        if p.is_rendering_enabled && is_visible_or_pre_render_scanline { // Bugged increment logic
+            ppu_increment_coarse_x(p)
+            ppu_increment_y(p)
+        } else { // Regular increment logic
+            p.v += p.PPUCTRL.I == 0 ? 1 : 32
+        }
+
         ppu_bus_set_address(b, p.v)
 
         p.io_bus_value = result
@@ -272,26 +283,18 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
     case 7: // PPUDATA
         ppu_bus_write(b, p.v, value)
 
-        // Auto-increment v based on PPUCTRL.I
-        p.v += p.PPUCTRL.I == 0 ? 1 : 32
-        ppu_bus_set_address(b, p.v)
-
-        // TODO: when writing during rendering, instead of auto-increment, v is updated in a weird way,
-        // causing simultaneous coarse X increment and Y increment.
+        // Increment v
+        if p.is_rendering_enabled && is_visible_or_pre_render_scanline { // Bugged increment logic
+            ppu_increment_coarse_x(p)
+            ppu_increment_y(p)
+        } else { // Regular increment logic
+            p.v += p.PPUCTRL.I == 0 ? 1 : 32
+        }
     }
 }
 
 // PPU runs 3x faster than CPU, so for each CPU tick, we tick PPU 3 times
 ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
-    update_sprite_x_counters :: proc(p: ^PPU) {
-        for i in 0 ..< 8 {
-            if p.sprite_x_position[i] > 0 {
-                p.sprite_x_position[i] -= 1
-                p.sprite_x_position[i] -= u8(p.sprite_x_position[i] > 0)
-            }
-        }
-    }
-
     ppu_handle_delayed_events(p)
 
     // Handle skipped cycle
@@ -366,7 +369,9 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
         // Decrement sprite X counters - this happens even when rendering is disabled
         if is_visible_scanline && is_rendering_cycle {
-            update_sprite_x_counters(p)
+            #unroll for i in 0 ..< 8 {
+                p.sprite_x_position[i] -= u8(p.sprite_x_position[i] > 0)
+            }
         }
     case 240: // Post-render scanline
         // PPU is idle during this scanline
@@ -407,26 +412,25 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
 ppu_handle_delayed_events :: proc(p: ^PPU) {
     // Handle IO bus value decay
-    if p.io_bus_decay_counter > 0 {
-        p.io_bus_decay_counter -= 1
-        if p.io_bus_decay_counter == 0 {
-            p.io_bus_value = 0
-        }
-    }
+    mask := u8(p.io_bus_decay_counter == 1) - 1 // 0 when decay counter reaches 0, 0xFF otherwise
+    p.io_bus_decay_counter -= u16(p.io_bus_decay_counter > 0)
+    p.io_bus_value &= mask // Mask with 0 when decay counter is 0, mask with 0xFF otherwise
 
     // Handle delayed rendering toggle
-    if p.rendering_toggle_delay > 0 {
-        p.rendering_toggle_delay -= 1
-        if p.rendering_toggle_delay == 0 {
-            p.is_rendering_enabled = !p.is_rendering_enabled
-        }
-    }
+    should_toggle := p.rendering_toggle_delay == 1
+    p.rendering_toggle_delay -= u8(p.rendering_toggle_delay > 0)
+    p.is_rendering_enabled ~= should_toggle // When counter reaches zero, flip the flag by XOR'ing with 1
 }
 
 ppu_background_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     switch p.scanline_cycle % 8 {
     case 1:
-        ppu_load_background_shifters(p)
+        when PPU_USE_OPTIMIZED_PROCS {
+            ppu_load_background_shifters_optimized(p)
+        } else {
+            ppu_load_background_shifters(p)
+        }
+
         p.bg_next_tile_id = ppu_fetch_background_nametable_byte(p, b)
     case 3:
         p.bg_next_tile_palette = ppu_fetch_background_attribute_byte(p, b)
@@ -438,19 +442,14 @@ ppu_background_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
         ppu_increment_coarse_x(p)
     }
 
-    ppu_shift_background_registers(p)
+    when PPU_USE_OPTIMIZED_PROCS {
+        ppu_shift_background_registers_optimized(p)
+    } else {
+        ppu_shift_background_registers(p)
+    }
 }
 
 ppu_rendering :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
-    shift_active_sprites :: proc(p: ^PPU) {
-        for i in 0 ..< 8 {
-            if p.sprite_x_position[i] == 0 {
-                p.sprite_shifter_pattern_low[i] <<= 1
-                p.sprite_shifter_pattern_high[i] <<= 1
-            }
-        }
-    }
-
     is_background_enabled := p.PPUMASK.b == 1
     is_sprite_enabled := p.PPUMASK.s == 1
 
@@ -464,13 +463,21 @@ ppu_rendering :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     if !is_background_enabled || (pixel_x < 8 && p.PPUMASK.m == 0) {
         background_color, background_palette = 0, 0
     } else {
-        background_color, background_palette = ppu_get_background_pixel(p)
+        when PPU_USE_OPTIMIZED_PROCS {
+            background_color, background_palette = ppu_get_background_pixel_optimized(p)
+        } else {
+            background_color, background_palette = ppu_get_background_pixel(p)
+        }
     }
 
     if !is_sprite_enabled || (pixel_x < 8 && p.PPUMASK.M == 0) {
         sprite_color, sprite_palette, sprite_priority = 0, 0, 0
     } else {
-        sprite_color, sprite_palette, sprite_priority = ppu_get_sprite_pixel(p)
+        when PPU_USE_OPTIMIZED_PROCS {
+            sprite_color, sprite_palette, sprite_priority = ppu_get_sprite_pixel_optimized(p)
+        } else {
+            sprite_color, sprite_palette, sprite_priority = ppu_get_sprite_pixel(p)
+        }
     }
 
     // Sprite 0 hit detection
@@ -497,7 +504,15 @@ ppu_rendering :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     }
 
     // After pixel extraction and sprite 0 hit detection, shift active sprites
-    shift_active_sprites(p)
+    #unroll for i in 0 ..< 8 {
+        // Since there are no branches (the condition is encoded as a shift of 0 or 1), compiler is
+        // able to efficiently vectorize this code. With explicit if's, the generated code is
+        // completely unoptimized.
+        shift := u8(p.sprite_x_position[i] == 0)
+            
+        p.sprite_shifter_pattern_low[i] <<= shift
+        p.sprite_shifter_pattern_high[i] <<= shift
+    }
 
     // Determine what pixel to draw
     if (sprite_color != 0 && sprite_priority == 0) || background_color == 0 { // Sprite pixel wins
@@ -589,7 +604,7 @@ ppu_sprite_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 }
 
 ppu_sprite_evaluation :: proc(p: ^PPU) {
-    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
+    sprite_height := u16(p.PPUCTRL.H == 0 ? 8 : 16)
     is_odd_cycle := p.scanline_cycle % 2 == 1
 
     to_next_sprite :: proc(p: ^PPU) {
@@ -666,7 +681,7 @@ ppu_sprite_evaluation :: proc(p: ^PPU) {
             } else {
                 // Evaluate data as a Y position. Due to hardware bug leading to m being incremented together with n,
                 // data will not always be the 0-th byte of a sprite, but we still evaluate it as such.
-                sprite_y := int(p.sprite_eval_oam_data)
+                sprite_y := u16(p.sprite_eval_oam_data)
                 sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
 
                 if sprite_in_range {
@@ -703,7 +718,7 @@ ppu_sprite_evaluation :: proc(p: ^PPU) {
             // If not in range, it will be just overwritten by the next sprite.
             p.secondary_oam[p.sprite_eval_secondary_oam_pos] = p.sprite_eval_oam_data
 
-            sprite_y := int(p.sprite_eval_oam_data)
+            sprite_y := u16(p.sprite_eval_oam_data)
             sprite_in_range := p.scanline >= sprite_y && p.scanline < sprite_y + sprite_height
             
             if sprite_in_range {
@@ -753,14 +768,43 @@ ppu_get_sprite_pixel :: proc(p: ^PPU) -> (color: u8, palette: u8, priority: u8) 
     return 0, 0, 0 // No opaque sprite found
 }
 
+ppu_get_sprite_pixel_optimized :: proc(p: ^PPU) -> (color, palette, priority: u8) {
+    sprite_x_position := simd.from_array(p.sprite_x_position)
+    sprite_shifter_pattern := simd.from_array(p.sprite_shifter_pattern_low) | simd.from_array(p.sprite_shifter_pattern_high)
+
+    is_active := simd.lanes_eq(sprite_x_position, #simd [8]u8{})
+    is_opaque := simd.lanes_gt(sprite_shifter_pattern, #simd [8]u8{0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F})
+
+    valid := is_active & is_opaque
+
+    bit_positions := #simd[8]u8{128, 64, 32, 16, 8, 4, 2, 1}
+    masked_bits := valid & bit_positions
+    
+    valid_mask := simd.reduce_or(masked_bits)
+    if valid_mask == 0 {
+        return
+    }
+
+    first_valid_sprite_idx := intrinsics.count_leading_zeros(valid_mask)
+
+    bit_0 := p.sprite_shifter_pattern_low[first_valid_sprite_idx] >> 7
+    bit_1 := p.sprite_shifter_pattern_high[first_valid_sprite_idx] >> 7
+    color = (bit_1 << 1) | bit_0
+        
+    palette = (p.sprite_attributes[first_valid_sprite_idx] & 0x03) + 4 // Bits 0-1, encode values 4-7
+    priority = (p.sprite_attributes[first_valid_sprite_idx] >> 5) & 1 // Bit 5
+            
+    return
+}
+
 ppu_fetch_sprite_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, sprite_idx: u8, plane: u16) -> u8 {
     attributes := p.sprite_attributes[sprite_idx]
 
     // Mask with (sprite_height - 1) to keep the value within 0-7/0-15 range.
     // This will be important for dummy sprite fetches where the Y coordinate is 0xFF.
     // In such cases, row might be negative, which will lead to wrap-around when casting to u16 during address calculation.
-    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
-    row := (p.scanline - int(p.sprite_y_position)) & (sprite_height - 1)
+    sprite_height := u16(p.PPUCTRL.H == 0 ? 8 : 16)
+    row := (p.scanline - u16(p.sprite_y_position)) & (sprite_height - 1)
     
     address: u16
 
@@ -855,9 +899,6 @@ ppu_fetch_background_nametable_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
 
 // Fetch attribute byte (palette number) using current v address
 ppu_fetch_background_attribute_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
-    address := 0x23C0 | (p.v & 0x0C00) | ((p.v >> 4) & 0x38) | ((p.v >> 2) & 0x07)
-    attribute_byte := ppu_bus_read(b, address)
-    
     // Each attribute byte controls 4 tiles (2x2 block)
     // Need to extract the correct 2 bits based on tile position within the block
     coarse_x := p.v & 0x001F
@@ -865,6 +906,9 @@ ppu_fetch_background_attribute_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
     
     // Which quadrant of the 4-tile block? (0-3)
     shift := ((coarse_y & 0x02) << 1) | (coarse_x & 0x02)
+
+    address := 0x23C0 | (p.v & 0x0C00) | ((p.v >> 4) & 0x38) | ((p.v >> 2) & 0x07)
+    attribute_byte := ppu_bus_read(b, address)
     
     return (attribute_byte >> shift) & 0x03
 }
@@ -895,6 +939,22 @@ ppu_load_background_shifters :: proc(p: ^PPU) {
     p.bg_shifter_palette_high = (p.bg_shifter_palette_high & 0xFF00) | palette_high
 }
 
+ppu_load_background_shifters_optimized :: proc(p: ^PPU) {
+    // Since all 4 background shifters are adjacent in memory, we can operate on them as a single 64-bit block.
+    shifters := (^u64)(&p.bg_shifter_pattern_low)
+    
+    pal := p.bg_next_tile_palette
+    
+    // Pack bytes into 64-bit register at offsets 0, 16, 32, 48
+    new_data := u64(p.bg_next_tile_pattern_low) | 
+               (u64(p.bg_next_tile_pattern_high) << 16) |
+               (u64((pal & 1) * 0xFF) << 32) | 
+               (u64((pal >> 1) * 0xFF) << 48)
+
+    // Mask preserves high bytes (0xFF00...), insert writes low bytes
+    shifters^ = (shifters^ & 0xFF00FF00FF00FF00) | new_data
+}
+
 ppu_shift_background_registers :: proc(p: ^PPU) {
     // For high bitplane of background pattern, 1 is shifted into the low bit of the shifter, instead of 0.
     // Usually, these 1's are overwritten with tile data when shifters are loaded every 8 cycles. But, if
@@ -911,6 +971,24 @@ ppu_shift_background_registers :: proc(p: ^PPU) {
     p.bg_shifter_palette_low  <<= 1
 }
 
+ppu_shift_background_registers_optimized :: proc(p: ^PPU) {
+    shifters := (^u64)(&p.bg_shifter_pattern_low)
+    
+    val := shifters^
+    
+    // Shift everything left by 1
+    val <<= 1
+    
+    // 1. Clear "carry" bits (16, 32, 48) where lower u16s bled into higher ones
+    // 2. Clear bit 0 (standard shift behavior)
+    val &= 0xFFFE_FFFE_FFFE_FFFE
+    
+    // Shift 1 into the pattern high bitplane
+    val |= 0x0000_0000_0001_0000
+    
+    shifters^ = val
+}
+
 ppu_get_background_pixel :: proc(p: ^PPU) -> (color: u16, palette: u16) {
     // Select bit based on fine X scroll
     bit_select := 15 - p.x
@@ -924,6 +1002,24 @@ ppu_get_background_pixel :: proc(p: ^PPU) -> (color: u16, palette: u16) {
     // Combine bits
     color = (pixel_bit_1 << 1) | pixel_bit_0
     palette = (palette_bit_1 << 1) | palette_bit_0
+    
+    return
+}
+
+ppu_get_background_pixel_optimized :: proc(p: ^PPU) -> (color: u16, palette: u16) {
+    shifters := (^u64)(&p.bg_shifter_pattern_low)^
+    
+    // Parallel shift - move target bits to positions: 0, 16, 32, 48
+    shift := (15 - u64(p.x)) & 0xF 
+    shifters >>= shift
+
+    // Only preserve the low bit of each u16
+    shifters &= 0x0001_0001_0001_0001
+
+    combined := shifters | (shifters >> 15)
+    
+    color   = u16(combined) & 0x03
+    palette = u16(combined >> 32) & 0x03
     
     return
 }

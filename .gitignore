@@ -2,3 +2,6 @@
 nes.dSYM/
 nes
 .idea/
+
+test/**
+games/**
