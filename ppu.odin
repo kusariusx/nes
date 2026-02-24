@@ -60,6 +60,7 @@ PPU :: struct {
     oam: [256]u8, // Object Attribute Memory
     secondary_oam: [32]u8,
     oam_corruption_seed: u8,
+    oam_data_latch: u8,
 
     // Internal PPU registers
     v: u16, // Current VRAM address (15 bits)
@@ -151,23 +152,13 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
         // Only bits 5-7 of the value are loaded onto the bus, others are left unchanged
         p.io_bus_value = (p.io_bus_value & 0x1F) | (u8(value) & 0xE0)
     case 4: // OAMDATA
-        is_visible_scanline := p.scanline >= 0 && p.scanline <= 239
-        is_secondary_oam_clearing := p.scanline_cycle >= 1 && p.scanline_cycle < 64
-        is_sprite_fetching := p.scanline_cycle >= 257 && p.scanline <= 320
-
-        // Special case - due to how secondary OAM clearing is implemented on real hardware (by reading OAM
-        // with special flag causing reads to always return 0xFF, and writing this value to secondary OAM), 
-        // all OAM reads return 0xFF while secondary OAM is being actively cleared.
-        // Additionally, reads during sprite fetching also return 0xFF.
-        if p.is_rendering_enabled && is_visible_scanline && (is_secondary_oam_clearing || is_sprite_fetching) {
-            p.io_bus_value = 0xFF
-            break
-        }
-        
-        p.io_bus_value = p.oam[p.OAMADDR]
-        
-        if p.OAMADDR % 4 == 2 { // Reading attribute byte - bits 2, 3 and 4 are missing
-            p.io_bus_value &= 0b11100011
+        // During rendering, the PPU's internal OAM data bus is continuously updated by sprite
+        // evaluation/fetching logic. Reading $2004 returns whatever value is on that bus.
+        if p.is_rendering_enabled && is_visible_or_pre_render_scanline {
+            p.io_bus_value = p.oam_data_latch
+        } else {
+            // When not rendering, just return the value from OAM[OAMADDR]
+            p.io_bus_value = ppu_read_oam(p, update_latch = false)
         }
     case 7: // PPUDATA
         // Read current data
@@ -332,6 +323,11 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
             if p.oam_corruption_seed != 0 && p.rendering_toggle_delay == 0 {
                 copy(p.oam[p.oam_corruption_seed:p.oam_corruption_seed+8], p.oam[0:8])
                 p.oam_corruption_seed = 0
+            }
+
+            // During idle/prefetch cycles, the PPU reads secondary_oam[0] onto the internal OAM data bus
+            if p.scanline_cycle == 0 || is_prefetch_cycle {
+                p.oam_data_latch = p.secondary_oam[0]
             }
 
             // Sprite evaluation happens on visible scanlines when rendering is enabled
@@ -552,17 +548,21 @@ ppu_sprite_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     switch p.scanline_cycle % 8 {
     case 1: // Read Y
         p.sprite_y_position = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+        p.oam_data_latch = p.sprite_y_position
         p.sprite_eval_secondary_oam_pos += 1
         ppu_fetch_background_nametable_byte(p, b) // Dummy nametable fetch (at cycles 1-2)
     case 2: // Read tile number
         p.sprite_tile_number = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+        p.oam_data_latch = p.sprite_tile_number
         p.sprite_eval_secondary_oam_pos += 1
     case 3: // Read attributes
         p.sprite_attributes[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+        p.oam_data_latch = p.sprite_attributes[sprite_idx]
         p.sprite_eval_secondary_oam_pos += 1
         ppu_fetch_background_nametable_byte(p, b) // Dummy nametable fetch (at cycles 3-4)
     case 4: // Read X
         p.sprite_x_position[sprite_idx] = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
+        p.oam_data_latch = p.sprite_x_position[sprite_idx]
 
         // Not incrementing secondary OAM position because that would incorrectly increment sprite_idx
     case 5: // Fetch pattern low (takes 2 cycles)
@@ -603,6 +603,20 @@ ppu_sprite_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     p.OAMADDR = 0
 }
 
+// Reads OAM byte from OAMADDR and updates internal OAM latch
+ppu_read_oam :: proc(p: ^PPU, update_latch := true) -> u8 {
+    oam_data := p.oam[p.OAMADDR]
+    if p.OAMADDR % 4 == 2 { // Attribute bits 2-4 don't physically exist in OAM
+        oam_data &= 0b11100011 
+    }
+
+    if update_latch {
+        p.oam_data_latch = oam_data
+    }
+
+    return oam_data
+}
+
 ppu_sprite_evaluation :: proc(p: ^PPU) {
     sprite_height := u16(p.PPUCTRL.H == 0 ? 8 : 16)
     is_odd_cycle := p.scanline_cycle % 2 == 1
@@ -641,6 +655,9 @@ ppu_sprite_evaluation :: proc(p: ^PPU) {
         // We still have some stuff to do on cycle 1
         fallthrough
     case 1 ..= 64: // Secondary OAM clearing
+        // The internal OAM data bus reads 0xFF during this phase (hardware forces reads to 0xFF)
+        p.oam_data_latch = 0xFF
+
         if is_odd_cycle {
             // Dummy read from OAM
             // Note: since OAM is not accessed through the bus (i.e. read has no side effects), 
@@ -654,8 +671,9 @@ ppu_sprite_evaluation :: proc(p: ^PPU) {
         if p.sprite_eval_done {
             if is_odd_cycle {
                 // Dummy read n-th sprite from OAM
-                // Reading OAM has no side effects, so can just do nothing here
+                ppu_read_oam(p)
             } else {
+                p.oam_data_latch = p.secondary_oam[p.sprite_eval_secondary_oam_pos]
                 to_next_sprite(p)
             }
 
@@ -666,8 +684,7 @@ ppu_sprite_evaluation :: proc(p: ^PPU) {
 
         // On odd cycles, data is read from OAM
         if is_odd_cycle {
-            p.sprite_eval_oam_data = p.oam[p.OAMADDR]
-
+            p.sprite_eval_oam_data = ppu_read_oam(p)
             break
         }
         
