@@ -3,7 +3,7 @@ package main
 import "core:simd"
 import "base:intrinsics"
 
-PPU_USE_OPTIMIZED_PROCS :: false
+PPU_USE_OPTIMIZED_PROCS :: true
 
 // IO bus decays to 0 after 3-30 milliseconds
 PPU_IO_BUS_DECAY_TIME :: 16129 // Approximately 3 milliseconds
@@ -56,11 +56,6 @@ PPU :: struct {
     ppudata_read_buffer: u8,
     io_bus_value: u8,
     io_bus_decay_counter: u16,
-
-    oam: [256]u8, // Object Attribute Memory
-    secondary_oam: [32]u8,
-    oam_corruption_seed: u8,
-    oam_data_latch: u8,
 
     // Internal PPU registers
     v: u16, // Current VRAM address (15 bits)
@@ -123,6 +118,11 @@ PPU :: struct {
 
     // Same as above, but to let CPU know that the concurrent PPU cycle is about to be skipped.
     will_skip_cycle: bool,
+
+    oam: [256]u8, // Object Attribute Memory
+    secondary_oam: [32]u8,
+    oam_corruption_seed: u8,
+    oam_data_latch: u8,
 
     framebuffer: [256 * 240]u8,
 }
@@ -291,23 +291,36 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     // Handle skipped cycle
     if p.will_skip_cycle {
         p.scanline_cycle += 1
+        p.will_skip_cycle = false
     }
-
-    is_pre_render_scanline := p.scanline == 261
-    is_visible_scanline := !is_pre_render_scanline
-
-    is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
-    is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
    
     switch p.scanline {
     case 0 ..= 239, 261: // Visible scanlines and pre-render scanline
         // Joining visible and pre-render scanlines because a lot of identical things happen on both of them
 
-        if is_pre_render_scanline && p.scanline_cycle == 1 {
-            // The three PPUSTATUS flags are automatically cleared on dot 1 of the pre-render scanline
-            p.PPUSTATUS.V = 0
-            p.PPUSTATUS.S = 0
-            p.PPUSTATUS.O = 0
+        is_pre_render_scanline := p.scanline == 261
+        is_visible_scanline := !is_pre_render_scanline
+
+        is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
+
+        if is_pre_render_scanline {
+            switch p.scanline_cycle {
+            case 0:
+                p.will_clear_ppustatus = true
+            case 1:
+                p.will_clear_ppustatus = false
+
+                // The three PPUSTATUS flags are automatically cleared on dot 1 of the pre-render scanline
+                p.PPUSTATUS.V = 0
+                p.PPUSTATUS.S = 0
+                p.PPUSTATUS.O = 0
+            case 338:
+                // Pre-render scanline varies in length, could be 341 or 340 cycles long. All other scanlines are 341 cycles long.
+                // Note: skipping condition does not depend on delayed rendering toggle, but on actual values in PPUMASK.
+                if p.is_odd_frame && (p.PPUMASK.s == 1 || p.PPUMASK.b == 1) {
+                    p.will_skip_cycle = true
+                }
+            }
         }
 
         // Regardless of whether rendering is enabled or disabled, reset secondary OAM position 
@@ -317,6 +330,8 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
         }
 
         if p.is_rendering_enabled {
+            is_prefetch_cycle := p.scanline_cycle >= 321 && p.scanline_cycle <= 336
+
             // Handle OAM corruption - copy 8 OAM bytes into the first 8 bytes of OAM. Target bytes are determind by the
             // corruption "seed" set when rendering is disabled during visible scanline.
             // Corruption happens when rendering is "really" enabled and not in "pending toggle" state.
@@ -330,16 +345,14 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
                 p.oam_data_latch = p.secondary_oam[0]
             }
 
-            // Sprite evaluation happens on visible scanlines when rendering is enabled
-            if is_visible_scanline {
+            if is_visible_scanline && is_rendering_cycle {
+                ppu_rendering(p, b)
                 ppu_sprite_evaluation(p)
             }
 
             // Sprite fetching happens on both visible scanlines and pre-render scanline
-            ppu_sprite_fetching(p, b)
-
-            if is_visible_scanline && is_rendering_cycle {
-                ppu_rendering(p, b)
+            if p.scanline_cycle >= 257 && p.scanline_cycle <= 320 {
+                ppu_sprite_fetching(p, b)
             }
 
             // Background fetching happens on both visible scanlines and pre-render scanline
@@ -371,23 +384,18 @@ ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
         }
     case 240: // Post-render scanline
         // PPU is idle during this scanline
-    case 241 ..= 260: // VBlank scanlines
-        if p.scanline == 241 && p.scanline_cycle == 1 && p.will_set_vbl {
+    case 241: // Start of VBlank (lasts during scanlines 241-260)
+        if p.scanline_cycle == 0 {
+            p.will_set_vbl = true
+        } else if p.scanline_cycle == 1 && p.will_set_vbl {
             // Set VBlank flag on the second cycle of 241st scanline
             p.PPUSTATUS.V = 1
+            p.will_set_vbl = false
         }
     }
 
     p.scanline_cycle += 1
 
-    // This is set AFTER we increment the cycle
-    p.will_set_vbl = p.scanline == 241 && p.scanline_cycle == 1
-    p.will_clear_ppustatus = is_pre_render_scanline && p.scanline_cycle == 1
-
-    // Pre-render scanline varies in length, could be 341 or 340 cycles long. All other scanlines are 341 cycles long.
-    // Note: skipping condition does not depend on delayed rendering toggle, but on actual values in PPUMASK.
-    p.will_skip_cycle = is_pre_render_scanline && p.scanline_cycle == 339 && p.is_odd_frame && (p.PPUMASK.s == 1 || p.PPUMASK.b == 1)
-    
     if p.scanline_cycle == 341 { // Scanline is completed
         p.scanline_cycle = 0
         p.scanline += 1
@@ -477,7 +485,7 @@ ppu_rendering :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     }
 
     // Sprite 0 hit detection
-    if p.sprite_0_on_current_scanline {
+    if p.sprite_0_on_current_scanline && p.PPUSTATUS.S == 0 {
         // If sprite 0 is present on the current scanline, it is guaranteed to be first in our shifters/latches
         sprite_0_bit_0 := p.sprite_shifter_pattern_low[0] >> 7
         sprite_0_bit_1 := p.sprite_shifter_pattern_high[0] >> 7
@@ -485,7 +493,6 @@ ppu_rendering :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 
         sprite_0_hit := // Sprite 0 is hit when...
             p.sprite_x_position[0] == 0 && // Sprite 0 is active
-            p.PPUSTATUS.S == 0 && // It was not hit earlier on the scanline
             is_sprite_enabled && // Sprite rendering is enabled - we need to check this because we read sprite data directly from shifters
             background_color != 0 && sprite_0_color != 0 && // Both background and sprite 0 are opaque
             // Sprite 0 hit is not detected when rendering is disabled for leftmost 8 pixels.
@@ -534,13 +541,6 @@ ppu_rendering :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
 }
 
 ppu_sprite_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
-    if p.scanline_cycle < 257 || p.scanline_cycle > 320 {
-        return
-    }
-
-    is_pre_render_scanline := p.scanline == 261
-    sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
-
     sprite_idx := p.sprite_eval_secondary_oam_pos >> 2
     
     // When we have less than 8 sprites on a scanline, we still perform all this fetches but discard
@@ -576,6 +576,9 @@ ppu_sprite_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
         // Even for left-over sprites (those that cointain $FF data), we still have to do all memory fetches.
         // The data is then discarded.
         discard_sprite := sprite_idx >= p.sprite_eval_found
+
+        is_pre_render_scanline := p.scanline == 261
+        sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
 
         // Edge case - under some conditions it is possible to draw sprites on scanline 0, namely when sprites
         // are fetched during pre-render scanline and are in-range for scanline 261 & 0xFF = 5.
@@ -618,7 +621,6 @@ ppu_read_oam :: proc(p: ^PPU, update_latch := true) -> u8 {
 }
 
 ppu_sprite_evaluation :: proc(p: ^PPU) {
-    sprite_height := u16(p.PPUCTRL.H == 0 ? 8 : 16)
     is_odd_cycle := p.scanline_cycle % 2 == 1
 
     to_next_sprite :: proc(p: ^PPU) {
@@ -668,6 +670,8 @@ ppu_sprite_evaluation :: proc(p: ^PPU) {
             p.sprite_eval_secondary_oam_pos = (p.sprite_eval_secondary_oam_pos + 1) & 0x1F
         }
     case 65 ..= 256: // Sprite evaluation
+        sprite_height := u16(p.PPUCTRL.H == 0 ? 8 : 16)
+
         if p.sprite_eval_done {
             if is_odd_cycle {
                 // Dummy read n-th sprite from OAM
