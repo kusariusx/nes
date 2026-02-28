@@ -214,7 +214,7 @@ ui_poll_event :: proc(ui: ^UI) -> bool {
             }
 
             // When in debug mode, make it possible to toggle tracing/disassembly at runtime
-            when ODIN_DEBUG {
+            when DEBUG {
                 if event.type == sdl.EventType.KEYDOWN {
                     #partial switch event.key.keysym.sym {
                     case sdl.Keycode.T:

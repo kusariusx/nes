@@ -36,20 +36,20 @@ disassembler_set_output_stream :: proc(output_writer: io.Writer) {
     d.output_writer = output_writer
 }
 
-@(disabled=!ODIN_DEBUG)
+@(disabled=!DEBUG)
 disassembler_start_instruction :: proc(opcode: u8, instruction: ^Instruction, cpu_state: CPU_State) {
     d.opcode = opcode
     d.instruction = instruction
     d.cpu_state = cpu_state
 }
 
-@(disabled=!ODIN_DEBUG)
+@(disabled=!DEBUG)
 disassembler_set_operand :: proc(operand: byte) {
     d.operand[d.operand_index] = operand
     d.operand_index += 1
 }
 
-@(disabled=!ODIN_DEBUG)
+@(disabled=!DEBUG)
 disassembler_end_instruction :: proc() {
     defer {
         d.operand = {0, 0}

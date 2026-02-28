@@ -7,10 +7,14 @@ import "core:flags"
 
 import sdl "vendor:sdl2"
 
+// Not using ODIN_DEBUG to have more granular control over generation of debug symbols and 
+// enabling debug features like disassembly and tracing.
+DEBUG :: #config(DEBUG, false)
+
 TARGET_FPS :: 60
 AUDIO_CUSHION_BYTES :: 4096
 
-when ODIN_DEBUG {
+when DEBUG {
 	Config :: struct {
 		rom: os.Handle `args:"pos=0,required,file=r" usage:"Path to ROM"`,
 
@@ -30,7 +34,7 @@ main :: proc() {
 	context.logger = logger
 	defer log.destroy_console_logger(logger)
 
-	when ODIN_DEBUG {
+	when DEBUG {
 		log.infof("setting up tracking allocator")
 
 		track: mem.Tracking_Allocator
@@ -43,7 +47,7 @@ main :: proc() {
 	config: Config
 	flags.parse_or_exit(&config, os.args)
 
-	when ODIN_DEBUG {
+	when DEBUG {
 		TRACING_ENABLED = config.tracing_enabled
 
 		if config.disassemble_into != 0 {
