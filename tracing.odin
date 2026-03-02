@@ -15,7 +15,7 @@ TRACE_COMPONENT :: bit_set[NES_Component]{
 	.IO,
 }
 
-@(disabled=!DEBUG) // Disabled when not in debug
+@(disabled=!DEBUG_FEATURES) // Disabled when not in debug
 trace :: proc(component: NES_Component, $format: string, args: ..any, loc := #caller_location) {
 	if !TRACING_ENABLED { // Tracing is also protected with runtime switch
 		return

@@ -127,7 +127,7 @@ PPU :: struct {
     framebuffer: [256 * 240]u8,
 }
 
-ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
+ppu_read_register :: proc(p: ^PPU, b: ^PPU_Bus, reg: u8) -> u8 {
     is_visible_or_pre_render_scanline := p.scanline == 261 || (p.scanline >= 0 && p.scanline <= 239)
 
     switch reg {
@@ -204,7 +204,7 @@ ppu_read_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8) -> u8 {
     return p.io_bus_value
 }
 
-ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
+ppu_write_register :: proc(p: ^PPU, b: ^PPU_Bus, reg: u8, value: u8) {
     // Regardless of the register (even read-only), value is loaded onto the I/O bus
     p.io_bus_value = value
     p.io_bus_decay_counter = PPU_IO_BUS_DECAY_TIME
@@ -285,7 +285,7 @@ ppu_write_register :: proc(p: ^PPU, b: ^NES_PPU_Bus, reg: u8, value: u8) {
 }
 
 // PPU runs 3x faster than CPU, so for each CPU tick, we tick PPU 3 times
-ppu_tick :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
+ppu_tick :: proc(p: ^PPU, b: ^PPU_Bus) {
     ppu_handle_delayed_events(p)
 
     // Handle skipped cycle
@@ -426,7 +426,7 @@ ppu_handle_delayed_events :: proc(p: ^PPU) {
     p.is_rendering_enabled ~= should_toggle // When counter reaches zero, flip the flag by XOR'ing with 1
 }
 
-ppu_background_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
+ppu_background_fetching :: proc(p: ^PPU, b: ^PPU_Bus) {
     switch p.scanline_cycle % 8 {
     case 1:
         when PPU_USE_OPTIMIZED_PROCS {
@@ -453,7 +453,7 @@ ppu_background_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     }
 }
 
-ppu_rendering :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
+ppu_rendering :: proc(p: ^PPU, b: ^PPU_Bus) {
     is_background_enabled := p.PPUMASK.b == 1
     is_sprite_enabled := p.PPUMASK.s == 1
 
@@ -540,7 +540,7 @@ ppu_rendering :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
     p.framebuffer[pixel_index] = color_index
 }
 
-ppu_sprite_fetching :: proc(p: ^PPU, b: ^NES_PPU_Bus) {
+ppu_sprite_fetching :: proc(p: ^PPU, b: ^PPU_Bus) {
     sprite_idx := p.sprite_eval_secondary_oam_pos >> 2
     
     // When we have less than 8 sprites on a scanline, we still perform all this fetches but discard
@@ -818,7 +818,7 @@ ppu_get_sprite_pixel_optimized :: proc(p: ^PPU) -> (color, palette, priority: u8
     return
 }
 
-ppu_fetch_sprite_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, sprite_idx: u8, plane: u16) -> u8 {
+ppu_fetch_sprite_pattern_byte :: proc(p: ^PPU, b: ^PPU_Bus, sprite_idx: u8, plane: u16) -> u8 {
     attributes := p.sprite_attributes[sprite_idx]
 
     // Mask with (sprite_height - 1) to keep the value within 0-7/0-15 range.
@@ -913,13 +913,13 @@ ppu_transfer_y :: proc(p: ^PPU) {
 }
 
 // Fetch nametable byte (tile ID) using current v address
-ppu_fetch_background_nametable_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
+ppu_fetch_background_nametable_byte :: proc(p: ^PPU, b: ^PPU_Bus) -> u8 {
     address := 0x2000 | (p.v & 0x0FFF)
     return ppu_bus_read(b, address)
 }
 
 // Fetch attribute byte (palette number) using current v address
-ppu_fetch_background_attribute_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
+ppu_fetch_background_attribute_byte :: proc(p: ^PPU, b: ^PPU_Bus) -> u8 {
     // Each attribute byte controls 4 tiles (2x2 block)
     // Need to extract the correct 2 bits based on tile position within the block
     coarse_x := p.v & 0x001F
@@ -935,7 +935,7 @@ ppu_fetch_background_attribute_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus) -> u8 {
 }
 
 // Fetch pattern byte (tile pixel data) for given plane
-ppu_fetch_background_pattern_byte :: proc(p: ^PPU, b: ^NES_PPU_Bus, tile_id: u8, plane: u8) -> u8 {
+ppu_fetch_background_pattern_byte :: proc(p: ^PPU, b: ^PPU_Bus, tile_id: u8, plane: u8) -> u8 {
     pattern_table_base := u16(p.PPUCTRL.B) * 0x1000
     
     // Each tile is 16 bytes (8 bytes for low plane, 8 bytes for high plane)

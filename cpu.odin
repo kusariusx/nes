@@ -87,10 +87,10 @@ CPU :: struct {
 Instruction :: struct {
 	mnemonic: string, // For disassembly/debug
 	format:   string, // For instructions with operands
-	handler:  proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8),
+	handler:  proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8),
 }
 
-cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
+cpu_tick :: proc(cpu: ^CPU, bus: ^CPU_Bus) {
 	// Alternate between read and write cycles
 	cpu.is_read_cycle = !cpu.is_read_cycle
 
@@ -331,7 +331,7 @@ cpu_tick_nes_bus :: proc(cpu: ^CPU, bus: ^NES_CPU_Bus) {
 	cpu_detect_nmi(cpu, bus)
 }
 
-cpu_detect_nmi :: proc(c: ^CPU, b: ^NES_CPU_Bus) {
+cpu_detect_nmi :: proc(c: ^CPU, b: ^CPU_Bus) {
 	// NMI edge detection.
 	// PPUSTATUS.V and PPUCTRL.V are AND'ed together and fed to CPU's NMI line.
 	// Additionally, we need to take into account the fact that VBL could potentially 
@@ -346,12 +346,7 @@ cpu_detect_nmi :: proc(c: ^CPU, b: ^NES_CPU_Bus) {
 }
 
 // Interrupts are usually polled on the second-to-last cycle of an instruction.
-cpu_poll_interrupts :: proc(c: ^CPU, b: CPU_Bus) {
-	b, ok := b.(^NES_CPU_Bus)
-	if !ok {
-		return // No-op for test bus
-	}
-
+cpu_poll_interrupts :: proc(c: ^CPU, b: ^CPU_Bus) {
 	// Edge case: NMI latch is updated at the end of every CPU cycle, AFTER the instruction cycle has been executed.
 	// Thus, if NMI occurs at the exact cycle when interrupts are polled by an instruction (on the second-to-last cycle),
 	// the poll will not detect a pending NMI since the latch is updated after the polling...
@@ -393,26 +388,6 @@ cpu_trigger_external_irq :: proc(c: ^CPU) {
 	c.irq_external_line = true
 }
 
-cpu_tick_test_bus :: proc(cpu: ^CPU, bus: ^Test_CPU_Bus) {
-	// For test bus, no need to check for interrupts or handle halt state
-
-	if cpu.instruction == nil {
-		opcode := cpu_bus_read(bus, cpu.PC)
-		cpu.instruction = &Instructions[opcode]
-		
-		cpu.instruction_cycle = 1
-		cpu.PC += 1
-	}
-
-	cpu.instruction.handler(cpu, bus, cpu.instruction_cycle)
-	cpu.instruction_cycle += 1
-}
-
-cpu_tick :: proc {
-	cpu_tick_nes_bus,
-	cpu_tick_test_bus,
-}
-
 // Each instruction will individually command when its execution is done.
 // This is done to allow instructions to control for how many cycles they run.
 cpu_instruction_done :: proc(cpu: ^CPU) {
@@ -420,7 +395,7 @@ cpu_instruction_done :: proc(cpu: ^CPU) {
 	cpu.instruction = nil
 }
 
-cpu_reset :: proc(cpu: ^CPU, bus: CPU_Bus) {
+cpu_reset :: proc(cpu: ^CPU, bus: ^CPU_Bus) {
 	cpu.A, cpu.X, cpu.Y = 0, 0, 0
 	cpu.S = 0xFD
 	
@@ -438,18 +413,18 @@ cpu_reset :: proc(cpu: ^CPU, bus: CPU_Bus) {
 	cpu.is_read_cycle = false
 }
 
-stack_push :: proc(cpu: ^CPU, bus: CPU_Bus, value: byte) {
+stack_push :: proc(cpu: ^CPU, bus: ^CPU_Bus, value: byte) {
 	// Stack is located on the second memory page 0x100-0x1FF
 	cpu_bus_write(bus, STACK_START + u16(cpu.S), value)
 	cpu.S -= 1
 }
 
-stack_pop :: proc(cpu: ^CPU, bus: CPU_Bus) -> byte {
+stack_pop :: proc(cpu: ^CPU, bus: ^CPU_Bus) -> byte {
 	cpu.S += 1
 	return cpu_bus_read(bus, STACK_START + u16(cpu.S))
 }
 
-interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, is_brk: bool) {
+interrupt_sequence_handler :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, is_brk: bool) {
 	switch cycle {
 	case 2:
 		// Dummy read from PC
@@ -503,7 +478,7 @@ interrupt_sequence_handler :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, is_brk: b
 // Ephemeral "instruction" implementing the interrupt handling sequence
 Interrupt_Handler := Instruction{
 	mnemonic = "nmi/irq",
-	handler = proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8) {
+	handler = proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8) {
 		interrupt_sequence_handler(cpu, bus, cycle, false)
 	}
 }

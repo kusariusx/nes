@@ -27,7 +27,7 @@ MMC3 :: struct{
     ppu_a12_prev: u16,
     ppu_a12_last_high_clock: u64,
     cpu: ^CPU,
-    ppu_bus: ^NES_PPU_Bus,
+    ppu_bus: ^PPU_Bus,
 
     prg_ram: [0x2000]byte,
     chr_ram: [0x2000]byte,

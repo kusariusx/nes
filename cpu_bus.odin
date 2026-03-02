@@ -1,11 +1,11 @@
 package main
 
-NES_CPU_Bus :: struct {
+CPU_Bus :: struct {
 	ram: [2 * 1024]u8, // 2 KB internal RAM
 
     // TODO: instead of all these links, maybe just link all components directly to the NES object itself?
     ppu: ^PPU,
-    ppu_bus: ^NES_PPU_Bus,
+    ppu_bus: ^PPU_Bus,
 
     apu: ^APU,
 
@@ -31,7 +31,7 @@ NES_CPU_Bus :: struct {
     address_bus_value: u16,
 }
 
-nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16, is_dma := false) -> u8 {
+cpu_bus_read :: proc(b: ^CPU_Bus, address: u16, is_dma := false) -> u8 {
     // DMA reads do not update CPU address bus, because DMAs have their own buses
     if !is_dma {
         b.address_bus_value = address
@@ -46,7 +46,7 @@ nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16, is_dma := false) -> u8 {
     if apu_registers_active {
         // APU address space is mirrored
         apu_address := 0x4000 | (address & 0x1F)
-        apu_value, apu_mask := nes_cpu_bus_resolve_read(b, apu_address)
+        apu_value, apu_mask := cpu_bus_resolve_read(b, apu_address)
 
         if apu_address_space { // Reading APU address space when it's active - all good
             value, mask = apu_value, apu_mask
@@ -56,7 +56,7 @@ nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16, is_dma := false) -> u8 {
             if mapper_region {
                 conflicting_value, conflicting_mask = mapper_cpu_read(b.mapper, b.rom, address)
             } else {
-                conflicting_value, conflicting_mask = nes_cpu_bus_resolve_read(b, address)
+                conflicting_value, conflicting_mask = cpu_bus_resolve_read(b, address)
             }
 
             if mapper_region && apu_address == 0x4015 {
@@ -82,7 +82,7 @@ nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16, is_dma := false) -> u8 {
         } else if mapper_region { // Unmapped space, let mapper handle
             value, mask = mapper_cpu_read(b.mapper, b.rom, address)
         } else {
-            value, mask = nes_cpu_bus_resolve_read(b, address)
+            value, mask = cpu_bus_resolve_read(b, address)
         }
     }
 
@@ -101,7 +101,7 @@ nes_cpu_bus_read :: proc(b: ^NES_CPU_Bus, address: u16, is_dma := false) -> u8 {
     return res
 }
 
-nes_cpu_bus_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
+cpu_bus_write :: proc(b: ^CPU_Bus, address: u16, value: u8) {
     b.data_bus_value = value
 
     if address >= 0x4020 && address <= 0xFFFF { 
@@ -109,14 +109,14 @@ nes_cpu_bus_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
         return // Ignore unhandled writes
     }
 
-    nes_cpu_bus_resolve_write(b, address, value)
+    cpu_bus_resolve_write(b, address, value)
 
     trace(.CPU_BUS, "wrote $%02X to $%04X, address bus - $%04X, data bus - $%02X", value, address, b.address_bus_value, b.data_bus_value)
 }
 
 // Handles read-write and read-only addresses.
 // Returns the value and a mask representing what bits of the value are active. Bits masked with 0's are open bus.
-nes_cpu_bus_resolve_read :: proc(b: ^NES_CPU_Bus, address: u16) -> (value: u8, mask: u8) {
+cpu_bus_resolve_read :: proc(b: ^CPU_Bus, address: u16) -> (value: u8, mask: u8) {
     switch address {
     case 0 ..= 0x1FFF: // Internal RAM (1 real and 3 mirrors)
         effective_address := address & 0x7FF // Mask to 11 bits (2 KB)
@@ -138,7 +138,7 @@ nes_cpu_bus_resolve_read :: proc(b: ^NES_CPU_Bus, address: u16) -> (value: u8, m
 }
 
 // Handles read-write and write-only addresses
-nes_cpu_bus_resolve_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
+cpu_bus_resolve_write :: proc(b: ^CPU_Bus, address: u16, value: u8) {
     switch address {
     case 0 ..= 0x1FFF: // Internal RAM (1 real and 3 mirrors)
         effective_address := address & 0x7FF // Mask to 11 bits (2 KB)
@@ -158,72 +158,5 @@ nes_cpu_bus_resolve_write :: proc(b: ^NES_CPU_Bus, address: u16, value: u8) {
         }
     case 0x4018 ..= 0x401F: // Additional APU and IO functionality which is normally disabled
     case 0x4020 ..= 0xFFFF: // Unmapped - cartridges are free to map this area to anything 
-    }
-}
-
-Test_CPU_Bus :: struct {
-    ram: [0x10000]u8,
-    
-    track_memory_access: bool,
-    memory_access_idx: int,
-    memory_accesses: [10]struct{ // 10 should be sufficient for any instruction
-        address, value: u16,
-        operation: string,
-    },
-}
-
-test_cpu_bus_read :: proc(b: ^Test_CPU_Bus, address: u16) -> u8 {
-    res := b.ram[address]
-
-    if b.track_memory_access {
-        b.memory_accesses[b.memory_access_idx] = {
-            address = address,
-            value = u16(res),
-            operation = "read",
-        }
-
-        b.memory_access_idx += 1
-    }
-
-    return res
-}
-
-test_cpu_bus_write :: proc(b: ^Test_CPU_Bus, address: u16, value: u8) {
-    b.ram[address] = value
-        
-    if b.track_memory_access {
-        b.memory_accesses[b.memory_access_idx] = {
-            address = address,
-            value = u16(value),
-            operation = "write",
-        }
-        
-        b.memory_access_idx += 1
-    }
-}
-
-CPU_Bus :: union {
-    ^NES_CPU_Bus,
-    ^Test_CPU_Bus,
-}
-
-cpu_bus_read :: proc(b: CPU_Bus, address: u16, is_dma := false) -> u8 {
-    switch bus in b {
-    case ^NES_CPU_Bus:
-        return nes_cpu_bus_read(bus, address, is_dma)
-    case ^Test_CPU_Bus:
-        return test_cpu_bus_read(bus, address)
-    }
-
-    // Should never happen since switch is exhaustive
-    return 0
-}
-
-cpu_bus_write :: proc(b: CPU_Bus, address: u16, value: u8) {
-    switch bus in b {
-    case ^NES_CPU_Bus:
-        nes_cpu_bus_write(bus, address, value)
-    case ^Test_CPU_Bus:
-        test_cpu_bus_write(bus, address, value)
     }
 }

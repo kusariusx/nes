@@ -118,7 +118,7 @@ test_transfer_y :: proc(t: ^testing.T) {
 @(test)
 test_fetch_nametable_byte :: proc(t: ^testing.T) {
     ppu: PPU
-    bus: NES_PPU_Bus
+    bus: PPU_Bus
 
     // We interact with VRAM through PPU bus, which means we have to specify nametable arangement
     rom := ROM{header = {flags_6 = { nametable_arrangement = 1 }}}
@@ -147,7 +147,7 @@ test_fetch_nametable_byte :: proc(t: ^testing.T) {
 @(test)
 test_fetch_attribute_byte :: proc(t: ^testing.T) {
     ppu: PPU
-    bus: NES_PPU_Bus
+    bus: PPU_Bus
 
     rom := ROM{header = {flags_6 = { nametable_arrangement = 0 }}}
     bus.rom = &rom
@@ -183,7 +183,7 @@ test_fetch_attribute_byte :: proc(t: ^testing.T) {
 @(test)
 test_fetch_pattern_byte :: proc(t: ^testing.T) {
     ppu: PPU
-    bus: NES_PPU_Bus
+    bus: PPU_Bus
     rom: ROM
 
     // Set up pattern table data

@@ -3,12 +3,12 @@ package main
 PPU_OPEN_BUS_VALUE :: 0xFF
 VRAM_BANK_SIZE :: 1024
 
-NES_PPU_Bus :: struct {
+PPU_Bus :: struct {
     vram: [2 * VRAM_BANK_SIZE]byte,
     palette_ram: [32]byte,
 
     cpu: ^CPU,
-    cpu_bus: ^NES_CPU_Bus,
+    cpu_bus: ^CPU_Bus,
     
     rom: ^ROM,
     mapper: Mapper,
@@ -16,7 +16,7 @@ NES_PPU_Bus :: struct {
     address_bus_value: u16,
 }
 
-ppu_bus_set_address :: proc(b: ^NES_PPU_Bus, address: u16) {
+ppu_bus_set_address :: proc(b: ^PPU_Bus, address: u16) {
     if b.address_bus_value == address { // Nothing changed
         return
     }
@@ -25,7 +25,7 @@ ppu_bus_set_address :: proc(b: ^NES_PPU_Bus, address: u16) {
     mapper_notify(b.mapper, .PPU_Address_Bus_Changed)
 }
 
-ppu_bus_read :: proc(b: ^NES_PPU_Bus, address: u16) -> u8 {
+ppu_bus_read :: proc(b: ^PPU_Bus, address: u16) -> u8 {
     address := address & 0x3FFF // PPU address bus is 14-bit
     ppu_bus_set_address(b, address)
     
@@ -61,7 +61,7 @@ ppu_bus_read :: proc(b: ^NES_PPU_Bus, address: u16) -> u8 {
     return PPU_OPEN_BUS_VALUE
 }
 
-ppu_bus_write :: proc(b: ^NES_PPU_Bus, address: u16, value: u8) {
+ppu_bus_write :: proc(b: ^PPU_Bus, address: u16, value: u8) {
     address := address & 0x3FFF
     ppu_bus_set_address(b, address)
 
@@ -98,7 +98,7 @@ ppu_bus_write :: proc(b: ^NES_PPU_Bus, address: u16, value: u8) {
 }
 
 // Retrieves n-th entry in palette RAM
-ppu_bus_read_palette_ram :: proc(b: ^NES_PPU_Bus, entry: u16) -> u8 {
+ppu_bus_read_palette_ram :: proc(b: ^PPU_Bus, entry: u16) -> u8 {
     effective_address := entry & 0x1F // Mask to 32 bytes
     if effective_address & 0x03 == 0 {
         // 0-th entry of each palette, both sprite and background (addresses 0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C),

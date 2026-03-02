@@ -8,8 +8,8 @@ NES :: struct {
     apu: ^APU,
     cpu: ^CPU,
 
-    cpu_bus: ^NES_CPU_Bus,
-    ppu_bus: ^NES_PPU_Bus,
+    cpu_bus: ^CPU_Bus,
+    ppu_bus: ^PPU_Bus,
 
     rom: ^ROM,
     mapper: Mapper,
@@ -53,8 +53,8 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
     ppu := new(PPU) or_return
 	apu := new(APU) or_return
     cpu := new(CPU) or_return
-	ppu_bus := new(NES_PPU_Bus) or_return
-    cpu_bus := new(NES_CPU_Bus) or_return
+	ppu_bus := new(PPU_Bus) or_return
+    cpu_bus := new(CPU_Bus) or_return
     io := new(IO) or_return
 
     // Allocate NES instance holding all components together

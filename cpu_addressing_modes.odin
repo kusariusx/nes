@@ -1,7 +1,7 @@
 package main
 
 // Immediate addressing
-imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: u8)) {
+imm :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: u8)) {
     switch cycle {
     case 1:
         cpu_poll_interrupts(cpu, bus)
@@ -20,7 +20,7 @@ imm :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU
 }
 
 // Common handling for zero-page addressing mode for read instructions
-zpg_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: u8)) {
+zpg_read :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: u8)) {
     switch cycle {
     case 2:
         // Fetch address, increment PC
@@ -41,7 +41,7 @@ zpg_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus
 
 // Zero-page indexed addressing, read instructions
 // Effective address is (operand + index) % 256
-zpgi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: u8)) {
+zpgi_read :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, index_register: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: u8)) {
     switch cycle {
     case 2:
         // Fetch address, increment PC
@@ -64,7 +64,7 @@ zpgi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action
 }
 
 // Absolute addressing, read instructions
-abs_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: u8)) {
+abs_read :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: u8)) {
     switch cycle {
     case 2:
         // Fetch low byte of address, increment PC
@@ -88,7 +88,7 @@ abs_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus
 
 // Absolute indexed addressing, read instructions
 // Index is either X or Y register
-absi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: u8)) {
+absi_read :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, index_register: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: u8)) {
     switch cycle {
     case 2:
         // Fetch low byte of address, increment PC
@@ -131,7 +131,7 @@ absi_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action
 
 // Indexed indirect addressing, read instructions
 // Effective address is placed in memory at addresses (operand + X) and (operand + X + 1)
-indx_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: u8)) {
+indx_read :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: u8)) {
     switch cycle {
     case 2:
         // Fetch pointer address
@@ -161,7 +161,7 @@ indx_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bu
 
 // Indirect indexed addressing, read instructions
 // Effective address is placed in memory at addresses (operand) and (operand + 1), and then Y added to it
-indy_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: u8)) {
+indy_read :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: u8)) {
     switch cycle {
     case 2:
         cpu.instruction_operand = cpu_bus_read(bus, cpu.PC)
@@ -200,7 +200,7 @@ indy_read :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bu
 }
 
 // Zero-page addressing, read-modify-write instructions
-zpg_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8)) {
+zpg_read_modify_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: ^u8)) {
     switch cycle {
     case 2:
         // Fetch address, increment PC
@@ -227,7 +227,7 @@ zpg_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(c
 }
 
 // Zero-page indexed addressing, read-modify-write instructions
-zpgi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8)) {
+zpgi_read_modify_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, index_register: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: ^u8)) {
     switch cycle {
     case 2:
         // Fetch address, increment PC
@@ -259,7 +259,7 @@ zpgi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_registe
 }
 
 // Absolute addressing, read-modify-write instructions
-abs_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8)) {
+abs_read_modify_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: ^u8)) {
     switch cycle {
     case 2:
         // Fetch low byte of address, increment PC
@@ -292,7 +292,7 @@ abs_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(c
 }
 
 // Absolute indexed addressing, read-modify-write instructions
-absi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8)) {
+absi_read_modify_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, index_register: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: ^u8)) {
     switch cycle {
     case 2:
         // Fetch low byte of address, increment PC
@@ -334,7 +334,7 @@ absi_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_registe
 
 // Relative addressing, used by branch instructions
 // Operand is an 8-bit signed offset for the PC
-rel :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, should_branch: bool) {
+rel :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, should_branch: bool) {
     switch cycle {
     case 1:
         cpu_poll_interrupts(cpu, bus)
@@ -382,7 +382,7 @@ rel :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, should_branch: bool) {
 }
 
 // Implied addressing - operands are determined by the instruction itself
-implied :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus)) {
+implied :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus)) {
     switch cycle {
     case 1:
         cpu_poll_interrupts(cpu, bus)
@@ -395,7 +395,7 @@ implied :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus:
 }
 
 // Zero-page addressing, write instructions
-zpg_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
+zpg_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, value: u8) {
     switch cycle {
     case 2:
         // Fetch address, increment PC
@@ -414,7 +414,7 @@ zpg_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
 }
 
 // Zero-page indexed addressing, write instructions
-zpgi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value: u8) {
+zpgi_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, index_register: u8, value: u8) {
     switch cycle {
     case 2:
         // Fetch address, increment PC
@@ -437,7 +437,7 @@ zpgi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value
 }
 
 // Absolute addressing, write instructions
-abs_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
+abs_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, value: u8) {
     switch cycle {
     case 2:
         // Fetch low byte of address, increment PC
@@ -461,7 +461,7 @@ abs_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
 }
 
 // Absolute indexed addressing, write instructions
-absi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value: u8) {
+absi_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, index_register: u8, value: u8) {
     switch cycle {
     case 2:
         // Fetch low byte of address, increment PC
@@ -493,7 +493,7 @@ absi_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, index_register: u8, value
 }
 
 // Indexed indirect addressing, write instructions
-indx_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
+indx_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, value: u8) {
     switch cycle {
     case 2:
         // Fetch pointer address, increment PC
@@ -522,7 +522,7 @@ indx_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
 }
 
 // Indirect indexed addressing, write instructions
-indy_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
+indy_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, value: u8) {
     switch cycle {
     case 2:
         // Fetch pointer address, increment PC
@@ -555,7 +555,7 @@ indy_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, value: u8) {
 }
 
 // Indexed indirect addressing, read-modify-write instructions
-indx_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8)) {
+indx_read_modify_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: ^u8)) {
     switch cycle {
     case 2:
         // Fetch pointer address, increment PC
@@ -593,7 +593,7 @@ indx_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(
 }
 
 // Indirect indexed addressing, read-modify-write instructions
-indy_read_modify_write :: proc(cpu: ^CPU, bus: CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: CPU_Bus, value: ^u8)) {
+indy_read_modify_write :: proc(cpu: ^CPU, bus: ^CPU_Bus, cycle: u8, action: proc(cpu: ^CPU, bus: ^CPU_Bus, value: ^u8)) {
     switch cycle {
     case 2:
         // Fetch pointer address, increment PC
