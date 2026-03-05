@@ -124,6 +124,7 @@ PPU :: struct {
     oam_corruption_seed: u8,
     oam_data_latch: u8,
 
+    framebuffer_index: int,
     framebuffer: [256 * 240]u8,
 }
 
@@ -281,6 +282,8 @@ ppu_write_register :: proc(p: ^PPU, b: ^PPU_Bus, reg: u8, value: u8) {
         } else { // Regular increment logic
             p.v += p.PPUCTRL.I == 0 ? 1 : 32
         }
+
+        ppu_bus_set_address(b, p.v)
     }
 }
 
@@ -402,6 +405,7 @@ ppu_tick :: proc(p: ^PPU, b: ^PPU_Bus) {
 
         if p.scanline == 262 { // Frame is completed
             p.scanline = 0
+            p.framebuffer_index = 0
             p.is_odd_frame = !p.is_odd_frame
         }
     }
@@ -486,23 +490,25 @@ ppu_rendering :: proc(p: ^PPU, b: ^PPU_Bus) {
 
     // Sprite 0 hit detection
     if p.sprite_0_on_current_scanline && p.PPUSTATUS.S == 0 {
-        // If sprite 0 is present on the current scanline, it is guaranteed to be first in our shifters/latches
-        sprite_0_bit_0 := p.sprite_shifter_pattern_low[0] >> 7
-        sprite_0_bit_1 := p.sprite_shifter_pattern_high[0] >> 7
-        sprite_0_color := (sprite_0_bit_1 << 1) | sprite_0_bit_0
-
-        sprite_0_hit := // Sprite 0 is hit when...
+        possible_sprite_0_hit := // Sprite 0 is hit when...
             p.sprite_x_position[0] == 0 && // Sprite 0 is active
             is_sprite_enabled && // Sprite rendering is enabled - we need to check this because we read sprite data directly from shifters
-            background_color != 0 && sprite_0_color != 0 && // Both background and sprite 0 are opaque
+            background_color != 0 && // Background is opaque (sprite pixel will be checked below)
             // Sprite 0 hit is not detected when rendering is disabled for leftmost 8 pixels.
             // We are either in the safe zone where this restriction does not apply (pixel_x >= 8),
             // Or both background and sprites are enabled in this zone.
             (pixel_x >= 8 || (p.PPUMASK.m == 1 && p.PPUMASK.M == 1)) &&
             pixel_x != 255 // Due to hardware specifics, sprite 0 hit cannot occur at X = 255
 
-        if sprite_0_hit {
-            p.PPUSTATUS.S = 1
+        if possible_sprite_0_hit {
+            // If sprite 0 is present on the current scanline, it is guaranteed to be first in our shifters/latches
+            sprite_0_bit_0 := p.sprite_shifter_pattern_low[0] >> 7
+            sprite_0_bit_1 := p.sprite_shifter_pattern_high[0] >> 7
+            sprite_0_color := (sprite_0_bit_1 << 1) | sprite_0_bit_0
+
+            if sprite_0_color != 0 {
+                p.PPUSTATUS.S = 1
+            }
         }
     }
 
@@ -536,8 +542,8 @@ ppu_rendering :: proc(p: ^PPU, b: ^PPU_Bus) {
     color_index := ppu_bus_read_palette_ram(b, palette_entry)
     
     // Write to framebuffer
-    pixel_index := p.scanline * 256 + pixel_x
-    p.framebuffer[pixel_index] = color_index
+    p.framebuffer[p.framebuffer_index] = color_index
+    p.framebuffer_index += 1
 }
 
 ppu_sprite_fetching :: proc(p: ^PPU, b: ^PPU_Bus) {
