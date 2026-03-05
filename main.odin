@@ -16,15 +16,15 @@ AUDIO_CUSHION_BYTES :: 4096
 
 when DEBUG_FEATURES {
 	Config :: struct {
-		rom: os.Handle `args:"pos=0,required,file=r" usage:"Path to ROM"`,
+		rom: ^os.File `args:"pos=0,required,file=r" usage:"Path to ROM"`,
 
 		// Debug-specific flags
 		tracing_enabled: bool `usage:"Enable generating tracelogs"`,
-		disassemble_into: os.Handle `args:"file=cw" usage:"Disassemble what CPU executes into a provided file"`,
+		disassemble_into: ^os.File `args:"file=cw" usage:"Disassemble what CPU executes into a provided file"`,
 	}
 } else {
 	Config :: struct {
-		rom: os.Handle `args:"pos=0,required,file=r" usage:"Path to ROM"`,
+		rom: ^os.File `args:"pos=0,required,file=r" usage:"Path to ROM"`,
 	}
 }
 
@@ -59,7 +59,7 @@ main :: proc() {
 		}
 	}
 
-	rom_data, err_read := os.read_entire_file_or_err(config.rom)
+	rom_data, err_read := os.read_entire_file(config.rom, context.allocator)
 	if err_read != nil {
 		log.errorf("unable to read ROM: %v", err_read)
 		return

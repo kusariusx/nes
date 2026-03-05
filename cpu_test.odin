@@ -3,17 +3,16 @@ package main
 import "core:strings"
 import "core:os"
 import "core:log"
-import "core:path/filepath"
 import "core:testing"
 
 @(test)
 test_instructions_nestest :: proc(t: ^testing.T) {
-    rom_data, ok := os.read_entire_file("test/cpu/nestest.nes")
-    testing.expect_value(t, ok, true)
+    rom_data, err_read := os.read_entire_file("test/cpu/nestest.nes", context.allocator)
+    testing.expect_value(t, err_read, nil)
     defer delete(rom_data)
 
-    nes, err := nes_init(rom_data)
-    testing.expect_value(t, err, nil)
+    nes, err_init := nes_init(rom_data)
+    testing.expect_value(t, err_init, nil)
     defer nes_free(nes)
 
     nes_reset(nes)
@@ -32,19 +31,21 @@ test_instructions_nestest :: proc(t: ^testing.T) {
 
 @(test)
 test_instructions_blargg :: proc(t: ^testing.T) {
-    walk_proc :: proc(info: os.File_Info, in_err: os.Error, user_data: rawptr) -> (walk_err: os.Error, skip_dir: bool) {
-        if info.is_dir || !strings.ends_with(info.name, ".nes") {
-            return
+    w := os.walker_create("test/cpu/blargg-singles")
+    defer os.walker_destroy(&w)
+
+    for info in os.walker_walk(&w) {
+        if info.type == .Directory || !strings.ends_with(info.name, ".nes") {
+            os.walker_skip_dir(&w)
+            continue
         }
 
-        t := cast(^testing.T)user_data
-        
-        rom_data, ok := os.read_entire_file(info.fullpath)
-        testing.expect_value(t, ok, true)
+        rom_data, err_read := os.read_entire_file(info.fullpath, context.allocator)
+        testing.expect_value(t, err_read, nil)
         defer delete(rom_data)
 
-        nes, err := nes_init(rom_data)
-        testing.expect_value(t, err, nil)
+        nes, err_init := nes_init(rom_data)
+        testing.expect_value(t, err_init, nil)
         defer nes_free(nes)
 
         nes_reset(nes)
@@ -69,9 +70,8 @@ test_instructions_blargg :: proc(t: ^testing.T) {
         if !test_ok {
             log.fatalf("test %s has failed", info.name)
         }
-
-        return
     }
 
-    filepath.walk("test/cpu/blargg-singles", walk_proc, t)
+    _, err_walk := os.walker_error(&w)
+    testing.expect_value(t, err_walk, nil)
 }
