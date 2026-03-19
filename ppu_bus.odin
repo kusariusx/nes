@@ -107,5 +107,12 @@ ppu_bus_read_palette_ram :: proc(b: ^PPU_Bus, entry: u16) -> u8 {
         effective_address &= 0x0F
     }
 
-    return b.palette_ram[effective_address]
+    // TODO: I hate that I have to reach to the PPUMASK through CPU BUS and PPU, literally though a chain of pointers.
+    // Think about how this can be simplified. Maybe just include a pointer to the whole NES?
+    res := b.palette_ram[effective_address]
+    if b.cpu_bus.ppu.PPUMASK.g == 1 {
+        res &= 0x30
+    }
+
+    return res
 }
