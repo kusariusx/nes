@@ -700,6 +700,8 @@ ppu_sprite_evaluation :: proc(p: ^PPU) {
         
         // Secondary OAM is full - overflow phase
         if p.sprite_eval_secondary_oam_pos == 32 {
+            p.oam_data_latch = p.secondary_oam[0]
+
             if p.sprite_eval_pending_reads > 0 {
                 // Dummy read the OAM
 
