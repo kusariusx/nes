@@ -1,6 +1,7 @@
 package main
 
 import "core:log"
+import "core:math"
 import sdl "vendor:sdl2"
 
 WINDOW_SCALE :: 3
@@ -12,10 +13,6 @@ WINDOW_WIDTH :: NES_SCREEN_WIDTH * WINDOW_SCALE
 WINDOW_HEIGHT :: NES_SCREEN_HEIGHT * WINDOW_SCALE
 
 AUDIO_SAMPLE_RATE :: 44100
-AUDIO_SAMPLE_BUFFER_SIZE :: AUDIO_SAMPLE_RATE / TARGET_FPS
-
-CPU_FREQUENCY :: 1789773
-CPU_CYCLES_PER_SAMPLE :: f32(CPU_FREQUENCY) / f32(AUDIO_SAMPLE_RATE)
 
 // NES palette - 64 colors in RGB format (0xRRGGBB)
 NES_PALETTE := [64]u32{
@@ -61,7 +58,9 @@ UI :: struct {
 
     audio_device_id: sdl.AudioDeviceID,
     audio_cycle_counter: f32,
+    audio_cycles_per_sample: f32,
     audio_previous_output: f32,
+    audio_frame_budget: Audio_Frame_Budget,
     audio_blip_buffer: Blip_Buffer,
 }
 
@@ -117,11 +116,17 @@ ui_init :: proc(
         panic("unable to initialize audio")
     }
 
+    audio_frame_budget := audio_frame_budget_init(nes.timing, AUDIO_SAMPLE_RATE)
+    // +1 is a carry guard: audio_frame_budget_next can return up to ceil(samples_per_frame)
+    // and the extra slot ensures blip_buffer_clear's tail copy stays in bounds.
+    audio_sample_capacity := int(math.ceil(audio_frame_budget.samples_per_frame)) + 1
+    audio_cycles_per_sample := f32(nes.timing.cpu_frequency_hz) / f32(AUDIO_SAMPLE_RATE)
+
     audio_spec := sdl.AudioSpec{
         freq = AUDIO_SAMPLE_RATE,
         format = sdl.AUDIO_F32SYS,
         channels = 1,
-        samples = AUDIO_SAMPLE_BUFFER_SIZE,
+        samples = u16(audio_sample_capacity),
     }
 
     audio_device_id := sdl.OpenAudioDevice(nil, false, &audio_spec, nil, nil)
@@ -143,12 +148,14 @@ ui_init :: proc(
         nes_mappings = nes_mappings,
         peripheral_mappings = peripheral_mappings,
         audio_device_id = audio_device_id,
-        audio_blip_buffer = Blip_Buffer{},
+        audio_cycles_per_sample = audio_cycles_per_sample,
+        audio_frame_budget = audio_frame_budget,
+        audio_blip_buffer = blip_buffer_init(audio_sample_capacity),
     }
 }
 
 ui_tick_audio :: proc(ui: ^UI) {
-    time := ui.audio_cycle_counter / CPU_CYCLES_PER_SAMPLE
+    time := ui.audio_cycle_counter / ui.audio_cycles_per_sample
 
     current_output := ui.nes.apu.mixer_output
     if current_output != ui.audio_previous_output {
@@ -161,12 +168,13 @@ ui_tick_audio :: proc(ui: ^UI) {
 }
 
 ui_flush_audio :: proc(ui: ^UI) {
-    blip_buffer_prepare(&ui.audio_blip_buffer)
+    sample_count := audio_frame_budget_next(&ui.audio_frame_budget)
+    blip_buffer_prepare(&ui.audio_blip_buffer, sample_count)
 
-    sdl.QueueAudio(ui.audio_device_id, &ui.audio_blip_buffer.buffer, u32(AUDIO_SAMPLE_BUFFER_SIZE) * size_of(f32))
+    sdl.QueueAudio(ui.audio_device_id, &ui.audio_blip_buffer.buffer[0], u32(sample_count) * size_of(f32))
     ui.audio_cycle_counter = 0.0
 
-    blip_buffer_clear(&ui.audio_blip_buffer)
+    blip_buffer_clear(&ui.audio_blip_buffer, sample_count)
 }
 
 ui_update_texture :: proc(ui: ^UI, framebuffer: []u8) {
@@ -257,6 +265,8 @@ ui_free :: proc(ui: ^UI) {
     if ui.audio_device_id != 0 {
         sdl.CloseAudioDevice(ui.audio_device_id)
     }
+
+    delete(ui.audio_blip_buffer.buffer)
 
     sdl.Quit()
 }

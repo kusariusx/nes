@@ -14,8 +14,12 @@ BLIP_BUFFER_MASTER_SIZE :: BLIP_BUFFER_PHASE_COUNT * BLIP_BUFFER_STEP_WIDTH
 Blip_Buffer_Steps: [BLIP_BUFFER_PHASE_COUNT][BLIP_BUFFER_STEP_WIDTH]f32
 
 Blip_Buffer :: struct {
-    buffer: [AUDIO_SAMPLE_BUFFER_SIZE + BLIP_BUFFER_STEP_WIDTH]f32,
+    buffer: []f32,
     integrator_sum: f32,
+}
+
+blip_buffer_init :: proc(sample_capacity: int) -> Blip_Buffer {
+    return Blip_Buffer{buffer = make([]f32, sample_capacity + BLIP_BUFFER_STEP_WIDTH)}
 }
 
 blip_buffer_init_steps :: proc() {
@@ -69,9 +73,9 @@ blip_buffer_add_delta :: proc(b: ^Blip_Buffer, time: f32, delta: f32) {
     }
 }
 
-blip_buffer_prepare :: proc(b: ^Blip_Buffer) {
+blip_buffer_prepare :: proc(b: ^Blip_Buffer, sample_count: int) {
     sum := b.integrator_sum
-    for i in 0 ..< AUDIO_SAMPLE_BUFFER_SIZE {
+    for i in 0 ..< sample_count {
         sum += b.buffer[i]
         b.buffer[i] = sum
         sum *= BLIP_BUFFER_HIGH_PASS
@@ -81,9 +85,9 @@ blip_buffer_prepare :: proc(b: ^Blip_Buffer) {
     b.integrator_sum = sum
 }
 
-blip_buffer_clear :: proc(b: ^Blip_Buffer) {
+blip_buffer_clear :: proc(b: ^Blip_Buffer, sample_count: int) {
     // Copy the tail of the buffer to the start so that we preserve continuity
-    copy(b.buffer[:BLIP_BUFFER_STEP_WIDTH], b.buffer[AUDIO_SAMPLE_BUFFER_SIZE:])
+    copy(b.buffer[:BLIP_BUFFER_STEP_WIDTH], b.buffer[sample_count:])
 
     // Zero the rest of the buffer
     mem.zero_slice(b.buffer[BLIP_BUFFER_STEP_WIDTH:])

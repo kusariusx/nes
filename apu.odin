@@ -16,6 +16,8 @@ APU_Status_Bits :: bit_field u8 {
 }
 
 APU :: struct {
+    timing: Console_Timing,
+
     is_read_cycle: bool,
     
     status: APU_Status_Bits,
@@ -209,7 +211,7 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
         a.noise_envelope_period_volume = value & 0xF
     case 0x400E:
         a.noise_mode = value & 0b10000000 != 0
-        a.noise_timer_period = APU_Noise_Period_Lookup[value & 0xF] - 1
+        a.noise_timer_period = a.timing.apu_noise_periods[value & 0xF] - 1
     case 0x400F:
         if a.status.noise == 1 {
             a.noise_length_counter = APU_Length_Counter_Lookup[value >> 3]
@@ -221,7 +223,7 @@ apu_write_register :: proc(a: ^APU, address: u16, value: u8) {
         a.dmc_loop = value & 0b01000000 != 0
 
         rate := value & 0xF
-        a.dmc_timer_period = APU_DMC_Period_Lookup[rate]
+        a.dmc_timer_period = a.timing.apu_dmc_periods[rate]
 
         if !a.dmc_irq_enabled {
             a.status.dmc_interrupt = 0
@@ -316,28 +318,28 @@ apu_update_frame_counter :: proc(a: ^APU) {
     }
 
     switch a.frame_counter {
-    case 3728:
+    case a.timing.apu_frame_counter_step_1:
         if !a.is_read_cycle {
             apu_tick_envelopes(a)
             apu_tick_linear_counter(a)
         }
-    case 7456:
-        if !a.is_read_cycle { 
+    case a.timing.apu_frame_counter_step_2:
+        if !a.is_read_cycle {
             // Length counters are ticked on write/put cycles
             apu_tick_length_counters(a)
             apu_tick_envelopes(a)
             apu_tick_sweeps(a)
             apu_tick_linear_counter(a)
         }
-    case 11185:
+    case a.timing.apu_frame_counter_step_3:
         if !a.is_read_cycle {
             apu_tick_envelopes(a)
             apu_tick_linear_counter(a)
         }
-    case 14914:
+    case a.timing.apu_frame_counter_step_4:
         if frame_counter_mode == 0 { // 4-step mode
             trace(.APU, "setting frame interrupt flag")
-            
+
             a.status.frame_interrupt = 1
 
             if !a.is_read_cycle {
@@ -350,7 +352,7 @@ apu_update_frame_counter :: proc(a: ^APU) {
                 a.frame_counter = 0xFFFF
             }
         }
-    case 18640:
+    case a.timing.apu_frame_counter_step_5:
         if frame_counter_mode == 1 { // 5-step mode
             if !a.is_read_cycle {
                 apu_tick_length_counters(a)

@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:os"
@@ -11,8 +12,8 @@ import sdl "vendor:sdl2"
 // enabling debug features like disassembly and tracing.
 DEBUG_FEATURES :: #config(DEBUG_FEATURES, false)
 
-TARGET_FPS :: 60
 AUDIO_CUSHION_BYTES :: 4096
+APP_CONSOLE_MODE :: Console_Mode.NTSC
 
 when DEBUG_FEATURES {
 	Config :: struct {
@@ -50,11 +51,11 @@ main :: proc() {
 	when DEBUG_FEATURES {
 		TRACING_ENABLED = config.tracing_enabled
 
-		if config.disassemble_into != 0 {
-			stream := os.stream_from_handle(config.disassemble_into)
+		if config.disassemble_into != nil {
+			stream := os.to_stream(config.disassemble_into)
 			disassembler_set_output_stream(stream)
 		}
-		defer if config.disassemble_into != 0 {
+		defer if config.disassemble_into != nil {
 			os.close(config.disassemble_into)
 		}
 	}
@@ -67,7 +68,7 @@ main :: proc() {
 	defer delete(rom_data)
 	defer os.close(config.rom)
 
-	nes, err_init := nes_init(rom_data)
+	nes, err_init := nes_init(rom_data, APP_CONSOLE_MODE)
 	if err_init != nil {
 		if err_mapper, ok := err_init.(Mapper_Initialization_Error); ok {
 			if err_mapper_not_supported, ok := err_mapper.(Mapper_Not_Supported); ok {
@@ -95,6 +96,15 @@ main :: proc() {
 		if nes.breakpoint {
 			nes_debug_run_cpu_instruction(nes) 
 		}
+	}}
+	nes_mappings[.P] = #partial {.Down = proc(nes: ^NES) { 
+		for addr := u16(0x500); addr < 0x700; addr += 16 {
+			for i := u16(0); i < 16; i += 1 {
+				fmt.printf("%02X ", cpu_bus_read(nes.cpu_bus, addr + i))
+			}
+			fmt.printf("\n")
+		}
+		fmt.printf("\n")
 	}}
 	defer delete(nes_mappings)
 
@@ -136,7 +146,7 @@ main :: proc() {
 			// When breakpoint is active, steps of the system will be controlled by user inputs.
 			// Small delay to avoid hot-looping (running as fast as possible) - this is not needed
 			// when breakpoint is active anyway.
-			sdl.Delay(1000 / TARGET_FPS) // Delay to maintain 60 FPS
+			sdl.Delay(u32(1000.0 / nes.timing.target_fps)) // Delay to maintain target FPS
 		}
         
 		ui_flush_audio(&ui)

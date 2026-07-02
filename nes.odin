@@ -16,6 +16,10 @@ NES :: struct {
 
     io: ^IO,
 
+    timing: Console_Timing,
+
+    ppu_master_clock_remainder: u8,
+
     breakpoint: bool,
 }
 
@@ -23,31 +27,25 @@ NES_Init_Error :: union #shared_nil {
     mem.Allocator_Error,
     Parsing_Error,
     Mapper_Initialization_Error,
-    enum {
-        PAL_Unsupported,
-        Dendy_Unsupported,
-    },
 }
 
-nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
-    validate_rom :: proc(rom: ^ROM) -> NES_Init_Error {
-        // Refuse to load PAL and Dendy-only ROMs
-        if nes_20_data, ok := rom.header.format_specific_flags.(NES_20_Header_Data); ok {
-            switch nes_20_data.flags_12.timing_mode {
-            case 0: // NTSC
-            case 1: // PAL
-                return .PAL_Unsupported
-            case 2: // Multi-region
-            case 3: // Dendy
-                return .Dendy_Unsupported
-            }
-        }
+nes_init :: proc(rom_data: []byte, mode: Console_Mode) -> (nes: ^NES, err: NES_Init_Error) {
+    rom := rom_parse(rom_data) or_return
 
-        return nil
+    // Log a warning if the ROM's timing metadata does not match the selected mode
+    if nes_20_data, ok := rom.header.format_specific_flags.(NES_20_Header_Data); ok {
+        rom_timing := nes_20_data.flags_12.timing_mode
+        switch rom_timing {
+        case 1: // PAL
+            if mode != .PAL {
+                log.warnf("ROM specifies PAL timing but console is configured as %v", mode)
+            }
+        case 3: // Dendy
+            log.warnf("ROM specifies Dendy timing; running in %v mode", mode)
+        }
     }
 
-    rom := rom_parse(rom_data) or_return
-    validate_rom(rom) or_return
+    timing := console_timing_for_mode(mode)
 
     // Allocate components
     ppu := new(PPU) or_return
@@ -58,8 +56,11 @@ nes_init :: proc(rom_data: []byte) -> (nes: ^NES, err: NES_Init_Error) {
     io := new(IO) or_return
 
     // Allocate NES instance holding all components together
-    nes = new_clone(NES{rom = rom, ppu = ppu, apu = apu, cpu = cpu, ppu_bus = ppu_bus, cpu_bus = cpu_bus, io = io}) or_return
+    nes = new_clone(NES{rom = rom, ppu = ppu, apu = apu, cpu = cpu, ppu_bus = ppu_bus, cpu_bus = cpu_bus, io = io, timing = timing}) or_return
     nes.mapper = mapper_init(nes) or_return
+
+    ppu.timing = timing
+    apu.timing = timing
 
     // Initialize links between components
     ppu_bus^ = {
@@ -116,10 +117,13 @@ nes_reset :: proc(nes: ^NES) {
 
 // Generally equivalent to 1 CPU cycle
 nes_tick :: proc(nes: ^NES) {
-    // 3 PPU cycles for every CPU cycle
-    ppu_tick(nes.ppu, nes.ppu_bus)
-    ppu_tick(nes.ppu, nes.ppu_bus)
-    ppu_tick(nes.ppu, nes.ppu_bus)
+    scheduler := Console_Tick_Scheduler{ppu_master_clock_remainder = nes.ppu_master_clock_remainder}
+    ppu_ticks := console_timing_next_ppu_tick_count(&scheduler, nes.timing)
+    nes.ppu_master_clock_remainder = scheduler.ppu_master_clock_remainder
+
+    for _ in 0 ..< ppu_ticks {
+        ppu_tick(nes.ppu, nes.ppu_bus)
+    }
 
     apu_tick(nes.apu)
     cpu_tick(nes.cpu, nes.cpu_bus)

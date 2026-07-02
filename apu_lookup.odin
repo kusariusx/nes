@@ -1,6 +1,7 @@
 package main
 
-APU_DMC_Period_Lookup := []u16{428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54}
+APU_DMC_Period_Lookup_NTSC :: [16]u16{428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54}
+APU_DMC_Period_Lookup_PAL  :: [16]u16{398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118, 98, 78, 66, 50}
 
 APU_Length_Counter_Lookup := []u8{ 
     10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14,
@@ -19,7 +20,8 @@ APU_Triangle_Sequence_Lookup := []u8{
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
 }
 
-APU_Noise_Period_Lookup := []u16{4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068}
+APU_Noise_Period_Lookup_NTSC :: [16]u16{4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068}
+APU_Noise_Period_Lookup_PAL  :: [16]u16{4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708, 944, 1890, 3778}
 
 // Pre-calculated lookup tables for calculating mixer output
 

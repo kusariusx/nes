@@ -41,6 +41,8 @@ PPUSTATUS_Bits :: bit_field u8 {
 }
 
 PPU :: struct {
+    timing: Console_Timing,
+
     PPUCTRL:   PPUCTRL_Bits,
     PPUMASK:   PPUMASK_Bits,
     PPUSTATUS: PPUSTATUS_Bits,
@@ -129,7 +131,7 @@ PPU :: struct {
 }
 
 ppu_read_register :: proc(p: ^PPU, b: ^PPU_Bus, reg: u8) -> u8 {
-    is_visible_or_pre_render_scanline := p.scanline == 261 || (p.scanline >= 0 && p.scanline <= 239)
+    is_visible_or_pre_render_scanline := p.scanline == p.timing.ppu_pre_render_scanline || (p.scanline >= 0 && p.scanline <= 239)
 
     switch reg {
     case 2: // PPUSTATUS
@@ -211,7 +213,7 @@ ppu_write_register :: proc(p: ^PPU, b: ^PPU_Bus, reg: u8, value: u8) {
     p.io_bus_decay_counter = PPU_IO_BUS_DECAY_TIME
 
     is_visible_scanline := p.scanline >= 0 && p.scanline <= 239
-    is_visible_or_pre_render_scanline := is_visible_scanline || p.scanline == 261
+    is_visible_or_pre_render_scanline := is_visible_scanline || p.scanline == p.timing.ppu_pre_render_scanline
 
     switch reg {
     case 0: // PPUCTRL
@@ -287,7 +289,8 @@ ppu_write_register :: proc(p: ^PPU, b: ^PPU_Bus, reg: u8, value: u8) {
     }
 }
 
-// PPU runs 3x faster than CPU, so for each CPU tick, we tick PPU 3 times
+// PPU dots per CPU cycle depends on the console timing profile (NTSC: 3, PAL: avg 3.2).
+// Callers use console_timing_next_ppu_tick_count to determine how many times to call ppu_tick.
 ppu_tick :: proc(p: ^PPU, b: ^PPU_Bus) {
     ppu_handle_delayed_events(p)
 
@@ -297,11 +300,10 @@ ppu_tick :: proc(p: ^PPU, b: ^PPU_Bus) {
         p.will_skip_cycle = false
     }
    
-    switch p.scanline {
-    case 0 ..= 239, 261: // Visible scanlines and pre-render scanline
+    if p.scanline <= 239 || p.scanline == p.timing.ppu_pre_render_scanline { // Visible scanlines and pre-render scanline
         // Joining visible and pre-render scanlines because a lot of identical things happen on both of them
 
-        is_pre_render_scanline := p.scanline == 261
+        is_pre_render_scanline := p.scanline == p.timing.ppu_pre_render_scanline
         is_visible_scanline := !is_pre_render_scanline
 
         is_rendering_cycle := p.scanline_cycle >= 1 && p.scanline_cycle <= 256
@@ -320,13 +322,13 @@ ppu_tick :: proc(p: ^PPU, b: ^PPU_Bus) {
             case 338:
                 // Pre-render scanline varies in length, could be 341 or 340 cycles long. All other scanlines are 341 cycles long.
                 // Note: skipping condition does not depend on delayed rendering toggle, but on actual values in PPUMASK.
-                if p.is_odd_frame && (p.PPUMASK.s == 1 || p.PPUMASK.b == 1) {
+                if p.timing.ppu_skip_odd_frame_dot && p.is_odd_frame && (p.PPUMASK.s == 1 || p.PPUMASK.b == 1) {
                     p.will_skip_cycle = true
                 }
             }
         }
 
-        // Regardless of whether rendering is enabled or disabled, reset secondary OAM position 
+        // Regardless of whether rendering is enabled or disabled, reset secondary OAM position
         // so that stale values do not pass onto the next frame.
         if p.scanline_cycle == 1 || p.scanline_cycle == 257 {
             p.sprite_eval_secondary_oam_pos = 0
@@ -362,14 +364,14 @@ ppu_tick :: proc(p: ^PPU, b: ^PPU_Bus) {
             if is_rendering_cycle || is_prefetch_cycle {
                 ppu_background_fetching(p, b)
             }
-            
+
             switch p.scanline_cycle {
             case 256:
                 ppu_increment_y(p)
             case 257:
                 ppu_transfer_x(p)
 
-                // After sprite evaluation and rendering, remember sprite 0 presense to be able 
+                // After sprite evaluation and rendering, remember sprite 0 presense to be able
                 // to detect sprite 0 hit on the next scanline.
                 p.sprite_0_on_current_scanline = p.sprite_eval_sprite_0_present
             case 280 ..= 304:
@@ -385,13 +387,13 @@ ppu_tick :: proc(p: ^PPU, b: ^PPU_Bus) {
                 p.sprite_x_position[i] -= u8(p.sprite_x_position[i] > 0)
             }
         }
-    case 240: // Post-render scanline
+    } else if p.scanline == p.timing.ppu_post_render_scanline { // Post-render scanline
         // PPU is idle during this scanline
-    case 241: // Start of VBlank (lasts during scanlines 241-260)
+    } else if p.scanline == p.timing.ppu_vblank_start_scanline { // Start of VBlank
         if p.scanline_cycle == 0 {
             p.will_set_vbl = true
         } else if p.scanline_cycle == 1 && p.will_set_vbl {
-            // Set VBlank flag on the second cycle of 241st scanline
+            // Set VBlank flag on the second cycle of the VBlank start scanline
             p.PPUSTATUS.V = 1
             p.will_set_vbl = false
         }
@@ -399,11 +401,11 @@ ppu_tick :: proc(p: ^PPU, b: ^PPU_Bus) {
 
     p.scanline_cycle += 1
 
-    if p.scanline_cycle == 341 { // Scanline is completed
+    if p.scanline_cycle == p.timing.ppu_dots_per_scanline { // Scanline is completed
         p.scanline_cycle = 0
         p.scanline += 1
 
-        if p.scanline == 262 { // Frame is completed
+        if p.scanline == p.timing.ppu_scanlines_per_frame { // Frame is completed
             p.scanline = 0
             p.framebuffer_index = 0
             p.is_odd_frame = !p.is_odd_frame
@@ -583,7 +585,7 @@ ppu_sprite_fetching :: proc(p: ^PPU, b: ^PPU_Bus) {
         // The data is then discarded.
         discard_sprite := sprite_idx >= p.sprite_eval_found
 
-        is_pre_render_scanline := p.scanline == 261
+        is_pre_render_scanline := p.scanline == p.timing.ppu_pre_render_scanline
         sprite_height := int(p.PPUCTRL.H == 0 ? 8 : 16)
 
         // Edge case - under some conditions it is possible to draw sprites on scanline 0, namely when sprites

@@ -11,7 +11,7 @@ test_instructions_nestest :: proc(t: ^testing.T) {
     testing.expect_value(t, err_read, nil)
     defer delete(rom_data)
 
-    nes, err_init := nes_init(rom_data)
+    nes, err_init := nes_init(rom_data, .NTSC)
     testing.expect_value(t, err_init, nil)
     defer nes_free(nes)
 
@@ -44,7 +44,7 @@ test_instructions_blargg :: proc(t: ^testing.T) {
         testing.expect_value(t, err_read, nil)
         defer delete(rom_data)
 
-        nes, err_init := nes_init(rom_data)
+        nes, err_init := nes_init(rom_data, .NTSC)
         testing.expect_value(t, err_init, nil)
         defer nes_free(nes)
 
