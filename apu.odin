@@ -16,6 +16,7 @@ APU_Status_Bits :: bit_field u8 {
 }
 
 APU :: struct {
+	is_mute: bool,
     is_read_cycle: bool,
     
     status: APU_Status_Bits,
@@ -675,6 +676,10 @@ apu_toggle_dmc :: proc(a: ^APU) {
 }
 
 apu_mix_output :: proc(a: ^APU) {
+	if a.is_mute {
+		return	
+	}
+
     pulse_output := APU_Mixer_Pulse_Lookup[a.pulse1_output + a.pulse2_output]
     triangle_noise_dmc_output := APU_Mixer_Triangle_Noise_DMC_Lookup[3 * a.triangle_output + 2 * a.noise_output + a.dmc_output]
     a.mixer_output = pulse_output + triangle_noise_dmc_output

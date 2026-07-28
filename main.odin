@@ -96,6 +96,10 @@ main :: proc() {
 			nes_debug_run_cpu_instruction(nes) 
 		}
 	}}
+	nes_mappings[.M] = #partial {.Down = proc(nes: ^NES) { 
+		nes.apu.is_mute = !nes.apu.is_mute
+		log.infof("APU is %s", nes.apu.is_mute ? "muted" : "unmuted")
+	}}
 	defer delete(nes_mappings)
 
 	// For now, hardcode the standard controller
